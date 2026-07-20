@@ -11,7 +11,6 @@ from typing import Callable
 DIARIZATION_PACKAGE = "pyannote.audio"
 DIARIZATION_SPEC = "pyannote.audio>=3.1"
 
-
 @dataclass
 class DepStatus:
     name: str
@@ -48,7 +47,10 @@ def install_diarization(
 
 def check_all_dependencies() -> list[DepStatus]:
     """Verify core and optional dependencies."""
+    from local_whisper_transcribe.cuda_runtime import check_cuda_runtime
+
     ffmpeg_ok, _ = _check_ffmpeg()
+    cuda_ok, _cuda_detail = check_cuda_runtime()
     return [
         DepStatus("python", True, optional=False, install_hint=""),
         DepStatus(
@@ -56,6 +58,12 @@ def check_all_dependencies() -> list[DepStatus]:
             ffmpeg_ok,
             optional=False,
             install_hint="lwt setup",
+        ),
+        DepStatus(
+            "cuda 12 runtime (gpu)",
+            cuda_ok,
+            optional=True,
+            install_hint="lwt install cuda",
         ),
         DepStatus(
             "pyannote.audio (diarization)",

@@ -31,13 +31,24 @@ from local_whisper_transcribe.config import (
 )
 from local_whisper_transcribe.diarize import (
     HF_MODEL_URL,
+    DiarizationAccessError,
     DiarizationNotInstalledError,
     DiarizationTokenError,
     apply_speaker_names,
     diarize_audio,
     merge_transcription_with_diarization,
 )
-from local_whisper_transcribe.install_extra import check_all_dependencies, install_diarization, is_diarization_installed
+from local_whisper_transcribe.install_extra import (
+    check_all_dependencies,
+    install_diarization,
+    is_diarization_installed,
+)
+from local_whisper_transcribe.cuda_runtime import (
+    check_cuda_runtime,
+    install_cuda_runtime,
+    install_cuda_toolkit,
+    is_cuda_runtime_installed,
+)
 from local_whisper_transcribe.models import (
     MODEL_INFO,
     check_cuda_available,
@@ -136,6 +147,8 @@ def _check_dependencies() -> list[tuple[str, bool, str]]:
 
     cuda_ok, cuda_detail = check_cuda_available()
     checks.append(("CUDA (optional)", cuda_ok, cuda_detail))
+    runtime_ok, runtime_detail = check_cuda_runtime()
+    checks.append(("CUDA 12 runtime", runtime_ok, runtime_detail))
     return checks
 
 
@@ -361,8 +374,16 @@ def _run_transcribe(
 
     try:
         with prepare_audio(input_file) as audio_path:
+            def on_device_fallback(message: str) -> None:
+                console.print(f"[yellow]![/yellow] {message}")
+
             with console.status("[bold green]Načítám Whisper model..."):
-                whisper_model = load_model(model_name, device=device, compute_type=compute_type)
+                whisper_model = load_model(
+                    model_name,
+                    device=device,
+                    compute_type=compute_type,
+                    on_device_fallback=on_device_fallback,
+                )
 
             progress = Progress(
                 SpinnerColumn(),
@@ -385,10 +406,14 @@ def _run_transcribe(
                     transcribe(
                         audio_path,
                         model=whisper_model,
+                        model_name=model_name,
+                        device=device,
+                        compute_type=compute_type,
                         language=lang,
                         task=task,
                         initial_prompt=prompt,
                         progress_callback=on_progress,
+                        on_device_fallback=on_device_fallback,
                     )
                 )
                 progress.update(task_id, completed=100)
@@ -425,6 +450,9 @@ def _run_transcribe(
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
     except DiarizationTokenError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    except DiarizationAccessError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
     except FFmpegNotFoundError as exc:
@@ -653,6 +681,70 @@ def onboard_cmd(
 ) -> None:
     """Alias for setup."""
     setup_cmd(model=model, force=force, quick=False)
+
+
+@install_app.command("cuda")
+def install_cuda_cmd(
+    toolkit: Annotated[
+        bool,
+        typer.Option(
+            "--toolkit",
+            help="Also install the full NVIDIA CUDA Toolkit via winget (Windows).",
+        ),
+    ] = False,
+) -> None:
+    """Install CUDA 12 GPU libraries (cuBLAS + cuDNN) for faster-whisper."""
+    _print_banner()
+
+    if is_cuda_runtime_installed():
+        console.print("[green]✓[/green] CUDA 12 runtime libraries are already installed.")
+    else:
+        console.print("[bold]Installing CUDA 12 runtime libraries...[/bold]")
+        console.print("Packages: [cyan]nvidia-cublas-cu12[/cyan], [cyan]nvidia-cudnn-cu12[/cyan]")
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            console=console,
+        )
+        with progress:
+            task_id = progress.add_task("pip install CUDA runtime", total=None)
+
+            def on_line(line: str) -> None:
+                progress.update(task_id, description=line[:70])
+
+            code = install_cuda_runtime(on_output=on_line)
+
+        if code != 0:
+            console.print("[red]CUDA runtime installation failed.[/red]")
+            raise typer.Exit(1)
+
+        console.print("[green]✓[/green] CUDA 12 runtime libraries installed.")
+
+    if toolkit:
+        console.print("\n[bold]Installing NVIDIA CUDA Toolkit via winget...[/bold]")
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            console=console,
+        )
+        with progress:
+            task_id = progress.add_task("winget install Nvidia.CUDA", total=None)
+
+            def on_toolkit_line(line: str) -> None:
+                progress.update(task_id, description=line[:70])
+
+            toolkit_code = install_cuda_toolkit(on_output=on_toolkit_line)
+
+        if toolkit_code != 0:
+            console.print("[yellow]CUDA Toolkit install did not complete.[/yellow]")
+        else:
+            console.print("[green]✓[/green] CUDA Toolkit installed.")
+
+    runtime_ok, runtime_detail = check_cuda_runtime()
+    console.print(f"\nStatus: {runtime_detail}")
+    console.print("[dim]Restart your terminal, then run transcription again.[/dim]")
 
 
 @install_app.command("diarization")

@@ -16,6 +16,7 @@ Local CLI tool (`lwt`) for transcribing meetings from audio and video files usin
 - [Examples](#examples)
 - [All commands](#all-commands)
 - [Speaker diarization](#speaker-diarization)
+  - [HuggingFace setup for diarization](#huggingface-setup-for-diarization)
 - [Ollama (translation & summarization)](#ollama-translation--summarization)
 - [Model recommendations](#model-recommendations)
 - [Configuration](#configuration)
@@ -45,7 +46,7 @@ Local CLI tool (`lwt`) for transcribing meetings from audio and video files usin
 | **ffmpeg** | yes | Extracts audio from video files |
 | **CUDA / NVIDIA GPU** | no | Speeds up transcription |
 | **Ollama** | no | Translation and summarization |
-| **HuggingFace token** | no | Only for speaker diarization |
+| **HuggingFace account + token** | no | Required for speaker diarization only (see [HuggingFace setup](#huggingface-setup-for-diarization)) |
 
 ### Installing ffmpeg
 
@@ -123,7 +124,7 @@ The wizard will:
 1. Check Python, ffmpeg, and CUDA availability
 2. Show a table of Whisper models (size, RAM, recommendations)
 3. Let you pick and download a model
-4. Optionally configure diarization (HuggingFace token)
+4. Optionally configure diarization (requires [HuggingFace setup](#huggingface-setup-for-diarization))
 5. Optionally check Ollama and pull an LLM model
 
 Quick variants (model download only):
@@ -189,6 +190,8 @@ lwt transcribe standup.mp4 --summarize --ollama-model llama3.2
 ```
 
 ### Speaker diarization
+
+> **Important:** `--diarize` requires a free HuggingFace account, accepting model licenses, and saving an access token. See [HuggingFace setup for diarization](#huggingface-setup-for-diarization) below.
 
 ```bash
 lwt install diarization
@@ -263,6 +266,8 @@ lwt models download medium --force   # re-download
 ### Install optional dependencies
 
 ```bash
+lwt install cuda                     # CUDA 12 GPU libraries (cuBLAS + cuDNN)
+lwt install cuda --toolkit           # + full NVIDIA CUDA Toolkit via winget (Windows)
 lwt install diarization              # install pyannote.audio
 lwt install check                    # verify all dependencies
 ```
@@ -293,22 +298,80 @@ lwt config reset                     # reset to defaults
 
 ## Speaker diarization
 
-Diarization identifies who said what. It requires:
+Diarization identifies who said what (Speaker 1, Speaker 2, …). It uses [pyannote.audio](https://github.com/pyannote/pyannote-audio) and downloads models from HuggingFace on first use.
 
-1. Install the dependency: `lwt install diarization`
-2. Accept the model license at [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
-3. Create a HuggingFace token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
-4. Save the token: `lwt config set diarization.hf_token hf_xxx`
+**Transcription works without this.** You only need HuggingFace if you use `--diarize`.
 
-Or configure everything via `lwt setup`.
+### HuggingFace setup for diarization
+
+This is a **one-time setup**. Without it you will get a `403` / `gated repo` error.
+
+#### Step 1 — Create a HuggingFace account
+
+Sign up for free at [huggingface.co/join](https://huggingface.co/join).
+
+#### Step 2 — Accept model licenses (all 3 required)
+
+Log in, open each link below, and click **Agree and access repository** (or similar):
+
+| Model | Link |
+|-------|------|
+| Speaker diarization pipeline | [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) |
+| Segmentation model | [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0) |
+| Speaker embedding model | [pyannote/wespeaker-voxceleb-resnet34-LM](https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM) |
+
+You must accept **all three**. Missing even one causes a 403 error during diarization.
+
+#### Step 3 — Create an access token
+
+1. Go to [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+2. Click **Create new token**
+3. Name it e.g. `lwt-diarization`
+4. Type: **Read** (sufficient for downloading models)
+5. Copy the token — it starts with `hf_`
+
+#### Step 4 — Save the token in `lwt`
 
 ```bash
+lwt config set diarization.hf_token hf_your_token_here
+```
+
+Or enter it during `lwt setup` when prompted.
+
+Verify:
+
+```bash
+lwt config show
+```
+
+The token is stored locally in your config file (`lwt config path`). It is only used to download pyannote models from HuggingFace.
+
+#### Step 5 — Install pyannote and transcribe
+
+```bash
+lwt install diarization
 lwt transcribe meeting.wav --diarize
 lwt transcribe meeting.wav --diarize --speaker-names "Alice,Bob,Carol"
 lwt transcribe meeting.wav --diarize --num-speakers 3
 ```
 
-If you use `--diarize` without a token, `lwt` will prompt you interactively and save it to your config.
+On first run, pyannote models are downloaded and cached locally. After that, diarization runs offline.
+
+### Quick reference
+
+```bash
+lwt install diarization
+lwt config set diarization.hf_token hf_xxx
+lwt transcribe meeting.wav --diarize
+```
+
+If you use `--diarize` without a saved token, `lwt` will prompt you interactively and save it to your config.
+
+You can also pass the token per command (not saved):
+
+```bash
+lwt transcribe meeting.wav --diarize --hf-token hf_xxx
+```
 
 ---
 
@@ -429,15 +492,54 @@ lwt ollama status
 lwt ollama pull llama3.2
 ```
 
-### Diarization failing
+### Diarization failing (403 / gated repo)
+
+**Symptom:** `Cannot access gated repo`, `403 Client Error`, or `you are not in the authorized list`.
+
+**Fix:**
+
+1. Make sure you accepted licenses for **all 3 models** (see [HuggingFace setup](#huggingface-setup-for-diarization)):
+   - [speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+   - [segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+   - [wespeaker-voxceleb-resnet34-LM](https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM)
+2. Create a **Read** token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+3. Save it:
 
 ```bash
-lwt install check
 lwt install diarization
 lwt config set diarization.hf_token hf_YOUR_TOKEN
+lwt config show
 ```
 
-Make sure you accepted the license at [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1).
+4. Retry transcription.
+
+If you only need transcription or summarization, omit `--diarize`:
+
+```bash
+lwt transcribe meeting.mp4 --summarize
+```
+
+### CUDA / `cublas64_12.dll` not found
+
+Your GPU is detected, but CUDA 12 libraries are missing. Install them via `lwt`:
+
+```bash
+lwt install cuda
+```
+
+For the full NVIDIA CUDA Toolkit on Windows (optional):
+
+```bash
+lwt install cuda --toolkit
+```
+
+`lwt` will automatically fall back to CPU if GPU libraries are still missing.
+
+To force CPU and skip GPU attempts:
+
+```bash
+lwt config set whisper.device cpu
+```
 
 ### Slow transcription
 

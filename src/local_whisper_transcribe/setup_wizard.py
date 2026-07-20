@@ -13,12 +13,20 @@ from local_whisper_transcribe.config import get_config_path, get_hf_token, load_
 from local_whisper_transcribe.diarize import HF_MODEL_URL
 from local_whisper_transcribe.install_extra import install_diarization, is_diarization_installed
 from local_whisper_transcribe.ollama_ops import get_ollama_status, pull_ollama_model
-from local_whisper_transcribe.system_checks import (
-    check_cuda,
-    check_python,
-    get_ffmpeg_install_command,
+from local_whisper_transcribe.cuda_runtime import (
+    check_cuda_runtime,
+    install_cuda_runtime,
+    is_cuda_runtime_installed,
 )
-from local_whisper_transcribe.models import KNOWN_MODELS, MODEL_INFO, download_model
+from local_whisper_transcribe.system_checks import check_python, get_ffmpeg_install_command
+from local_whisper_transcribe.models import (
+    KNOWN_MODELS,
+    MODEL_INFO,
+    download_model,
+    format_size,
+    get_model_status,
+    is_model_cached,
+)
 
 
 def run_setup_wizard(
@@ -59,11 +67,25 @@ def run_setup_wizard(
             raise typer.Exit(1)
 
     # CUDA
-    cuda_ok, cuda_count = check_cuda()
+    cuda_ok, cuda_detail = check_cuda_runtime()
     if cuda_ok:
-        console.print(f"[green]✓[/green] CUDA dostupná ({cuda_count} GPU)")
+        console.print(f"[green]✓[/green] {cuda_detail}")
     else:
-        console.print("[yellow]![/yellow] CUDA nedostupná — přepis poběží na CPU")
+        console.print(f"[yellow]![/yellow] {cuda_detail}")
+        if "lwt install cuda" in cuda_detail and ask_confirm(
+            "Nainstalovat CUDA 12 runtime knihovny nyní? (lwt install cuda)",
+            default=True,
+            console=console,
+        ):
+            with console.status("[bold green]Instaluji CUDA 12 runtime..."):
+                code = install_cuda_runtime()
+            if code == 0:
+                console.print("[green]✓[/green] CUDA 12 runtime nainstalován")
+                runtime_ok, runtime_detail = check_cuda_runtime()
+                if runtime_ok:
+                    console.print(f"[green]✓[/green] {runtime_detail}")
+            else:
+                console.print("[red]Instalace selhala.[/red] Zkuste: [cyan]lwt install cuda[/cyan]")
 
     # Whisper model
     console.print("\n[bold]Whisper model[/bold]")
@@ -85,27 +107,54 @@ def run_setup_wizard(
 
     device = config["whisper"]["device"]
     compute_type = config["whisper"]["compute_type"]
-    should_download = True if model else ask_confirm(
-        f"Stáhnout model [cyan]{selected}[/cyan] nyní?",
-        default=True,
-        console=console,
-    )
+    already_cached = is_model_cached(selected)
+
+    if already_cached and not force:
+        status = get_model_status(selected)
+        console.print(
+            f"[green]✓[/green] Model [cyan]{selected}[/cyan] už je stažený "
+            f"([dim]{format_size(status.size_bytes)}[/dim])"
+        )
+        should_download = ask_confirm(
+            f"Přestáhnout model [cyan]{selected}[/cyan]?",
+            default=False,
+            console=console,
+        )
+        download_force = should_download
+    elif model:
+        should_download = True
+        download_force = force
+    else:
+        should_download = ask_confirm(
+            f"Stáhnout model [cyan]{selected}[/cyan] nyní?",
+            default=not already_cached,
+            console=console,
+        )
+        download_force = force
+
     if should_download:
         messages: list[str] = []
 
         def on_status(message: str) -> None:
             messages.append(message)
 
-        with console.status(f"[bold green]Stahuji model {selected}..."):
+        status_label = (
+            f"Ověřuji model {selected}..."
+            if already_cached and not download_force
+            else f"Stahuji model {selected}..."
+        )
+        with console.status(f"[bold green]{status_label}"):
             download_model(
                 selected,
                 device=device,
                 compute_type=compute_type,
-                force=force,
+                force=download_force,
                 status_callback=on_status,
             )
         for message in messages:
             console.print(f"  [dim]•[/dim] {message}")
+        console.print(f"[green]✓[/green] Model [cyan]{selected}[/cyan] připraven")
+    elif already_cached:
         console.print(f"[green]✓[/green] Model [cyan]{selected}[/cyan] připraven")
 
     language = ask_prompt(

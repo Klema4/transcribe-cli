@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any, Callable
 
+from local_whisper_transcribe.audio import load_audio_waveform
 from local_whisper_transcribe.transcribe import Segment
 
 DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
 HF_MODEL_URL = "https://huggingface.co/pyannote/speaker-diarization-3.1"
+HF_MODELS_TO_ACCEPT = (
+    "pyannote/speaker-diarization-3.1",
+    "pyannote/segmentation-3.0",
+    "pyannote/wespeaker-voxceleb-resnet34-LM",
+)
 
 
 class DiarizationNotInstalledError(RuntimeError):
@@ -19,9 +26,15 @@ class DiarizationTokenError(RuntimeError):
     """Raised when a HuggingFace token is required but missing."""
 
 
+class DiarizationAccessError(RuntimeError):
+    """Raised when HuggingFace model access is denied."""
+
+
 def _require_pipeline():
     try:
-        from pyannote.audio import Pipeline
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*torchcodec.*", category=UserWarning)
+            from pyannote.audio import Pipeline
     except ImportError as exc:
         raise DiarizationNotInstalledError(
             "pyannote.audio is not installed.\n"
@@ -30,6 +43,29 @@ def _require_pipeline():
             f"Then accept the model license at {HF_MODEL_URL}"
         ) from exc
     return Pipeline
+
+
+def _load_pipeline(hf_token: str):
+    Pipeline = _require_pipeline()
+    try:
+        return Pipeline.from_pretrained(DIARIZATION_MODEL, token=hf_token)
+    except Exception as exc:
+        message = str(exc).lower()
+        if any(
+            marker in message
+            for marker in ("403", "gated", "authorized", "cannot access", "restricted")
+        ):
+            models = "\n".join(f"  - https://huggingface.co/{model}" for model in HF_MODELS_TO_ACCEPT)
+            raise DiarizationAccessError(
+                "HuggingFace denied access to the diarization model.\n"
+                "1. Accept the user conditions for ALL required models:\n"
+                f"{models}\n"
+                "2. Create a token at https://huggingface.co/settings/tokens\n"
+                "3. Save it with:\n"
+                "     lwt config set diarization.hf_token <token>\n"
+                "4. Retry transcription."
+            ) from exc
+        raise
 
 
 def _segment_overlap(start_a: float, end_a: float, start_b: float, end_b: float) -> float:
@@ -55,12 +91,10 @@ def diarize_audio(
             "     lwt config set diarization.hf_token <token>"
         )
 
-    Pipeline = _require_pipeline()
-
     if progress_callback:
         progress_callback("Loading diarization model...")
 
-    pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, token=hf_token)
+    pipeline = _load_pipeline(hf_token)
 
     kwargs: dict[str, int] = {}
     if num_speakers is not None:
@@ -71,9 +105,14 @@ def diarize_audio(
         kwargs["max_speakers"] = max_speakers
 
     if progress_callback:
+        progress_callback("Preparing audio for diarization...")
+
+    audio_input = load_audio_waveform(Path(audio_path))
+
+    if progress_callback:
         progress_callback("Running speaker diarization...")
 
-    diarization = pipeline(str(audio_path), **kwargs)
+    diarization = pipeline(audio_input, **kwargs)
 
     segments: list[dict[str, Any]] = []
     for turn, _, speaker in diarization.itertracks(yield_label=True):

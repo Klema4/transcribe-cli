@@ -83,6 +83,42 @@ def extract_audio_to_wav(input_path: Path, output_path: Path) -> None:
         )
 
 
+def load_audio_waveform(audio_path: Path, sample_rate: int = 16000) -> dict:
+    """Load audio as a pyannote-compatible in-memory waveform via ffmpeg."""
+    import numpy as np
+    import torch
+
+    ffmpeg = check_ffmpeg()
+    cmd = [
+        ffmpeg,
+        "-nostdin",
+        "-i",
+        str(audio_path),
+        "-f",
+        "f32le",
+        "-acodec",
+        "pcm_f32le",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        "1",
+        "pipe:1",
+    ]
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        raise RuntimeError(f"ffmpeg failed to decode audio for diarization:\n{stderr}")
+
+    if not result.stdout:
+        raise RuntimeError(f"No audio data decoded from {audio_path}")
+
+    waveform = np.frombuffer(result.stdout, dtype=np.float32).copy()
+    return {
+        "waveform": torch.from_numpy(waveform).unsqueeze(0),
+        "sample_rate": sample_rate,
+    }
+
+
 @contextmanager
 def prepare_audio(path: Path) -> Generator[Path, None, None]:
     """Yield a WAV path ready for transcription, extracting video audio if needed."""

@@ -3,7 +3,9 @@
 import pytest
 
 from local_whisper_transcribe.diarize import (
+    DiarizationAccessError,
     DiarizationNotInstalledError,
+    _load_pipeline,
     apply_speaker_names,
     diarize_audio,
     merge_transcription_with_diarization,
@@ -65,3 +67,18 @@ def test_diarize_audio_requires_pyannote(monkeypatch):
         diarize_audio("audio.wav", hf_token="test-token")
 
     assert "lwt install diarization" in str(exc_info.value)
+
+
+def test_load_pipeline_access_error(monkeypatch):
+    class FakePipeline:
+        @staticmethod
+        def from_pretrained(*_args, **_kwargs):
+            raise RuntimeError("403 Client Error: Cannot access gated repo")
+
+    monkeypatch.setattr("local_whisper_transcribe.diarize._require_pipeline", lambda: FakePipeline)
+
+    with pytest.raises(DiarizationAccessError) as exc_info:
+        _load_pipeline("hf_test")
+
+    assert "speaker-diarization-3.1" in str(exc_info.value)
+    assert "segmentation-3.0" in str(exc_info.value)
