@@ -4,6 +4,8 @@ Local CLI tool (`lwt`) for transcribing meetings from audio and video files usin
 
 **Everything is controlled exclusively through the `lwt` command** — no manual pip extras, environment variables, or `huggingface-cli` required.
 
+📖 **Full documentation:** [GitHub Wiki](https://github.com/Klema4/local-whisper-transcribe/wiki) · [docs/](docs/Home.md) folder in this repo
+
 ---
 
 ## Table of contents
