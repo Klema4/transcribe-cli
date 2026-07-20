@@ -12,7 +12,7 @@ Without setup you get: `403 Client Error`, `gated repo`, or `not in the authoriz
 
 Sign up free: [huggingface.co/join](https://huggingface.co/join)
 
-## Step 2 — Accept ALL 3 model licenses
+## Step 2 — Accept ALL 4 model licenses
 
 Log in, open each link, click **Agree and access repository**:
 
@@ -21,8 +21,15 @@ Log in, open each link, click **Agree and access repository**:
 | Diarization pipeline | https://huggingface.co/pyannote/speaker-diarization-3.1 |
 | Segmentation | https://huggingface.co/pyannote/segmentation-3.0 |
 | Speaker embedding | https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM |
+| **Community PLDA (pyannote 4.x)** | https://huggingface.co/pyannote/speaker-diarization-community-1 |
 
-**All three are required.** Missing one = 403 error.
+**All four are required** with pyannote.audio 4.x. Missing one (especially `community-1`) = access error.
+
+Verify before transcribing:
+
+```bash
+lwt install verify-diarization
+```
 
 ## Step 3 — Create access token
 

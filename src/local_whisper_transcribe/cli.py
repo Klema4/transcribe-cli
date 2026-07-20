@@ -31,12 +31,14 @@ from local_whisper_transcribe.config import (
 )
 from local_whisper_transcribe.diarize import (
     HF_MODEL_URL,
+    HF_MODELS_TO_ACCEPT,
     DiarizationAccessError,
     DiarizationNotInstalledError,
     DiarizationTokenError,
     apply_speaker_names,
     diarize_audio,
     merge_transcription_with_diarization,
+    verify_diarization_access,
 )
 from local_whisper_transcribe.install_extra import (
     check_all_dependencies,
@@ -47,8 +49,11 @@ from local_whisper_transcribe.cuda_runtime import (
     check_cuda_runtime,
     install_cuda_runtime,
     install_cuda_toolkit,
+    install_torch_cuda,
     is_cuda_runtime_installed,
+    is_torch_cuda_installed,
 )
+from local_whisper_transcribe.device import resolve_device
 from local_whisper_transcribe.models import (
     MODEL_INFO,
     check_cuda_available,
@@ -84,7 +89,7 @@ app.add_typer(config_app, name="config")
 app.add_typer(install_app, name="install")
 app.add_typer(ollama_app, name="ollama")
 
-console = Console()
+console = Console(legacy_windows=False)
 
 BANNER = r"""
  _               _ _            __        __           _             
@@ -258,6 +263,30 @@ def _ensure_model_ready(model_name: str) -> None:
     raise typer.Exit(1)
 
 
+def _print_diarization_hf_check(hf_token: str) -> bool:
+    """Verify HuggingFace access before transcription. Returns True if all models OK."""
+    results = verify_diarization_access(hf_token)
+    failed = [(model_id, detail) for model_id, ok, detail in results if not ok]
+    if not failed:
+        return True
+
+    table = Table(title="HuggingFace diarization access", show_header=True)
+    table.add_column("Model")
+    table.add_column("Status")
+    for model_id, ok, detail in results:
+        status = "[green]OK[/green]" if ok else f"[red]{detail}[/red]"
+        table.add_row(model_id, status)
+    console.print(table)
+    console.print(
+        "\n[red]Diarizace selže[/red] dokud nepřijmete licence u VŠECH modelů "
+        "(včetně [bold]speaker-diarization-community-1[/bold] — pyannote 4.x ho vyžaduje navíc).\n"
+        "Odkazy:\n"
+        + "\n".join(f"  [cyan]https://huggingface.co/{m}[/cyan]" for m in HF_MODELS_TO_ACCEPT)
+        + "\n\nPoté: [cyan]lwt install verify-diarization[/cyan]"
+    )
+    return False
+
+
 def _resolve_hf_token(
     config: dict,
     cli_token: str | None,
@@ -358,8 +387,45 @@ def _run_transcribe(
                 console.print("[green]✓[/green] pyannote.audio nainstalován")
             else:
                 raise typer.Exit(1)
+        if not _print_diarization_hf_check(resolved_hf_token):
+            raise typer.Exit(1)
     else:
         resolved_hf_token = None
+
+    def on_device_note(message: str) -> None:
+        console.print(f"[yellow]![/yellow] {message}")
+
+    # If diarization wants GPU but PyTorch is CPU-only, offer to fix once.
+    if use_diarization and device in ("auto", "cuda") and not is_torch_cuda_installed():
+        from local_whisper_transcribe.device import whisper_cuda_available
+
+        if whisper_cuda_available():
+            console.print(
+                "[yellow]Whisper can use GPU, but PyTorch is CPU-only "
+                "(diarization would otherwise force both to CPU).[/yellow]"
+            )
+            if ask_confirm("Install CUDA PyTorch now? (lwt install cuda)", default=True, console=console):
+                with console.status("[bold green]Installing CUDA PyTorch..."):
+                    code = install_torch_cuda(on_output=lambda _: None)
+                if code == 0 and is_torch_cuda_installed():
+                    console.print("[green]OK[/green] CUDA PyTorch ready.")
+                else:
+                    console.print(
+                        "[yellow]CUDA PyTorch install failed or not detected yet. "
+                        "Using CPU for both.[/yellow]"
+                    )
+
+    device_plan = resolve_device(
+        device,
+        need_torch=use_diarization,
+        on_note=on_device_note,
+    )
+    device = device_plan.device
+    console.print(
+        f"[dim]Compute device: [bold]{device}[/bold]"
+        + (" (Whisper + diarization)" if use_diarization else " (Whisper)")
+        + "[/dim]"
+    )
 
     if not is_setup_complete() and not is_model_cached(model_name):
         console.print(
@@ -421,15 +487,31 @@ def _run_transcribe(
             result = result_holder[0]
 
             if use_diarization and resolved_hf_token:
-                diarization_status = Text("Připravuji diarizaci...")
-                with console.status(diarization_status):
+                diarize_progress = Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                    TimeElapsedColumn(),
+                    console=console,
+                )
+                with diarize_progress:
+                    diarize_task = diarize_progress.add_task("Diarizace...", total=100)
 
-                    def on_diarize_progress(message: str) -> None:
-                        diarization_status.plain = message
+                    def on_diarize_progress(
+                        completed: float, total: float, description: str
+                    ) -> None:
+                        diarize_progress.update(
+                            diarize_task,
+                            completed=completed,
+                            total=total,
+                            description=f"Diarizace: {description}",
+                        )
 
                     diarization_segments = diarize_audio(
                         audio_path,
                         resolved_hf_token,
+                        device=device,
                         num_speakers=num_speakers,
                         progress_callback=on_diarize_progress,
                     )
@@ -693,11 +775,11 @@ def install_cuda_cmd(
         ),
     ] = False,
 ) -> None:
-    """Install CUDA 12 GPU libraries (cuBLAS + cuDNN) for faster-whisper."""
+    """Install CUDA stack for Whisper (CTranslate2) and diarization (PyTorch)."""
     _print_banner()
 
     if is_cuda_runtime_installed():
-        console.print("[green]✓[/green] CUDA 12 runtime libraries are already installed.")
+        console.print("[green]OK[/green] CUDA 12 runtime libraries are already installed.")
     else:
         console.print("[bold]Installing CUDA 12 runtime libraries...[/bold]")
         console.print("Packages: [cyan]nvidia-cublas-cu12[/cyan], [cyan]nvidia-cudnn-cu12[/cyan]")
@@ -713,13 +795,40 @@ def install_cuda_cmd(
             def on_line(line: str) -> None:
                 progress.update(task_id, description=line[:70])
 
-            code = install_cuda_runtime(on_output=on_line)
+            code = install_cuda_runtime(on_output=on_line, include_torch=False)
 
         if code != 0:
             console.print("[red]CUDA runtime installation failed.[/red]")
             raise typer.Exit(1)
 
-        console.print("[green]✓[/green] CUDA 12 runtime libraries installed.")
+        console.print("[green]OK[/green] CUDA 12 runtime libraries installed.")
+
+    if is_torch_cuda_installed():
+        console.print("[green]OK[/green] CUDA PyTorch is already available.")
+    else:
+        console.print("\n[bold]Installing CUDA PyTorch (required for GPU diarization)...[/bold]")
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            console=console,
+        )
+        with progress:
+            task_id = progress.add_task("pip install torch+cu126", total=None)
+
+            def on_torch_line(line: str) -> None:
+                progress.update(task_id, description=line[:70])
+
+            torch_code = install_torch_cuda(on_output=on_torch_line)
+
+        if torch_code != 0:
+            console.print(
+                "[red]CUDA PyTorch installation failed.[/red]\n"
+                "Whisper may still use GPU; diarization would stay on CPU.\n"
+                "Retry: [cyan]lwt install cuda[/cyan]"
+            )
+            raise typer.Exit(1)
+        console.print("[green]OK[/green] CUDA PyTorch installed.")
 
     if toolkit:
         console.print("\n[bold]Installing NVIDIA CUDA Toolkit via winget...[/bold]")
@@ -740,7 +849,7 @@ def install_cuda_cmd(
         if toolkit_code != 0:
             console.print("[yellow]CUDA Toolkit install did not complete.[/yellow]")
         else:
-            console.print("[green]✓[/green] CUDA Toolkit installed.")
+            console.print("[green]OK[/green] CUDA Toolkit installed.")
 
     runtime_ok, runtime_detail = check_cuda_runtime()
     console.print(f"\nStatus: {runtime_detail}")
@@ -775,10 +884,73 @@ def install_diarization_cmd() -> None:
         raise typer.Exit(1)
 
     console.print("[green]✓[/green] pyannote.audio nainstalován.")
+    console.print("Přijměte licence u VŠECH 4 modelů (viz [cyan]lwt install verify-diarization[/cyan]):")
+    for model_id in HF_MODELS_TO_ACCEPT:
+        console.print(f"  [cyan]https://huggingface.co/{model_id}[/cyan]")
+    console.print("Token: [cyan]lwt config set diarization.hf_token <token>[/cyan]")
+
+
+@install_app.command("verify-diarization")
+def verify_diarization_cmd(
+    hf_token: Annotated[
+        Optional[str], typer.Option("--hf-token", help="HuggingFace token (or use config).")
+    ] = None,
+) -> None:
+    """Verify HuggingFace access to all diarization models before transcribing."""
+    _print_banner()
+    config = load_config()
+    token = get_hf_token(config, hf_token)
+    if not token:
+        console.print(
+            "[red]Chybí HuggingFace token.[/red]\n"
+            "Nastavte: [cyan]lwt config set diarization.hf_token <token>[/cyan]"
+        )
+        raise typer.Exit(1)
+
+    if not is_diarization_installed():
+        console.print("[yellow]pyannote.audio není nainstalován.[/yellow] Spusťte: lwt install diarization")
+        raise typer.Exit(1)
+
+    console.print("[dim]torchcodec varování při importu pyannote je normální — audio řešíme přes ffmpeg.[/dim]\n")
+
+    results = verify_diarization_access(token)
+    table = Table(title="HuggingFace model access", show_header=True)
+    table.add_column("Model")
+    table.add_column("Status")
+    table.add_column("Detail")
+
+    all_ok = True
+    for model_id, ok, detail in results:
+        if ok:
+            table.add_row(model_id, "[green]OK[/green]", detail)
+        else:
+            all_ok = False
+            table.add_row(model_id, "[red]FAIL[/red]", detail)
+
+    console.print(table)
+
+    if all_ok:
+        console.print("\n[green]OK[/green] Vsechny modely dostupne. Diarizace by mela fungovat.")
+        with console.status("[bold green]Testuji nacitani pipeline..."):
+            try:
+                from local_whisper_transcribe.diarize import _load_pipeline
+
+                _load_pipeline(token)
+            except DiarizationAccessError as exc:
+                console.print(f"\n[red]Pipeline selhala:[/red] {exc}")
+                raise typer.Exit(1) from exc
+            except Exception as exc:
+                console.print(f"\n[red]Pipeline selhala:[/red] {exc}")
+                raise typer.Exit(1) from exc
+        console.print("[green]OK[/green] Pipeline se nacetla.")
+        return
+
     console.print(
-        f"Přijměte licenci modelu: {HF_MODEL_URL}\n"
-        "Nastavte token: [cyan]lwt config set diarization.hf_token <token>[/cyan]"
+        "\n[red]Chybí přístup k jednomu nebo více modelům.[/red]\n"
+        "U každého FAIL odkazu klikněte [bold]Agree and access repository[/bold].\n"
+        "Často chybí 4. model: [cyan]pyannote/speaker-diarization-community-1[/cyan]"
     )
+    raise typer.Exit(1)
 
 
 @install_app.command("check")

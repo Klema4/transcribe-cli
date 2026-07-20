@@ -312,7 +312,7 @@ This is a **one-time setup**. Without it you will get a `403` / `gated repo` err
 
 Sign up for free at [huggingface.co/join](https://huggingface.co/join).
 
-#### Step 2 — Accept model licenses (all 3 required)
+#### Step 2 — Accept model licenses (all 4 required with pyannote 4.x)
 
 Log in, open each link below, and click **Agree and access repository** (or similar):
 
@@ -321,8 +321,15 @@ Log in, open each link below, and click **Agree and access repository** (or simi
 | Speaker diarization pipeline | [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) |
 | Segmentation model | [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0) |
 | Speaker embedding model | [pyannote/wespeaker-voxceleb-resnet34-LM](https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM) |
+| **Community PLDA (pyannote 4.x)** | [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) |
 
-You must accept **all three**. Missing even one causes a 403 error during diarization.
+You must accept **all four**. The 4th (`community-1`) is easy to miss but required by pyannote.audio 4.x.
+
+Verify before transcribing:
+
+```bash
+lwt install verify-diarization
+```
 
 #### Step 3 — Create an access token
 
@@ -500,17 +507,18 @@ lwt ollama pull llama3.2
 
 **Fix:**
 
-1. Make sure you accepted licenses for **all 3 models** (see [HuggingFace setup](#huggingface-setup-for-diarization)):
+1. Make sure you accepted licenses for **all 4 models** (see [HuggingFace setup](#huggingface-setup-for-diarization)):
    - [speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
    - [segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
    - [wespeaker-voxceleb-resnet34-LM](https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM)
+   - **[speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)** (often the missing one)
 2. Create a **Read** token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
-3. Save it:
+3. Save it and verify:
 
 ```bash
 lwt install diarization
 lwt config set diarization.hf_token hf_YOUR_TOKEN
-lwt config show
+lwt install verify-diarization
 ```
 
 4. Retry transcription.

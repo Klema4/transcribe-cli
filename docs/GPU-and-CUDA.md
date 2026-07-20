@@ -1,45 +1,42 @@
 # GPU and CUDA
 
-## Install CUDA 12 runtime (recommended)
+Whisper (faster-whisper / CTranslate2) and diarization (pyannote / PyTorch) share **one** device per job: both GPU or both CPU — never mixed.
 
-Fixes `cublas64_12.dll is not found`:
+## Install CUDA stack (recommended)
 
 ```bash
 lwt install cuda
 ```
 
-Installs `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` via pip.
+This installs:
+
+1. **CUDA 12 runtime** (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) — Whisper GPU
+2. **CUDA PyTorch** (`torch+cu126`) — diarization neural nets on GPU
+3. **CPU torchaudio** — resample/fbank helpers (CUDA torchaudio is often blocked on Windows)
 
 Optional full toolkit (Windows):
+
 ```bash
 lwt install cuda --toolkit
 ```
 
-Restart terminal after install.
-
-## Verify
+## Check
 
 ```bash
 lwt install check
 ```
 
-Should show: `CUDA runtime ready (1 GPU)`
+Look for CUDA ready for Whisper + diarization.
 
-## CPU fallback
+## Behaviour
 
-If GPU libraries are missing, `lwt` automatically retries on CPU with a warning.
+| Mode | Device |
+|------|--------|
+| Transcribe only | GPU if CTranslate2 sees CUDA |
+| Transcribe + `--diarize` | GPU only if **both** CTranslate2 and PyTorch see CUDA; otherwise **CPU for both** |
 
-Force CPU only:
+Force CPU:
+
 ```bash
 lwt config set whisper.device cpu
 ```
-
-## Model recommendations
-
-| Model | Size | RAM | Notes |
-|-------|------|-----|-------|
-| tiny | ~75 MB | ~1 GB | Fastest |
-| base | ~150 MB | ~1 GB | Basic |
-| small | ~500 MB | ~2 GB | **Default** |
-| medium | ~1.5 GB | ~4 GB | High quality |
-| large-v3 | ~3 GB | ~10 GB | Best, use GPU |

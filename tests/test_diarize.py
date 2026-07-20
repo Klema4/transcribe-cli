@@ -51,6 +51,49 @@ def test_apply_speaker_names():
     assert renamed[1].speaker == "Petra"
 
 
+def test_overall_progress_segmentation_midway():
+    from local_whisper_transcribe.diarize import _overall_progress
+
+    value, label = _overall_progress("segmentation", completed=50, total=100)
+    assert "Segmentation" in label
+    # load 5% + prepare 5% + half of 40% = 30%
+    assert 29.0 <= value <= 31.0
+
+
+def test_overall_progress_finalize_is_100():
+    from local_whisper_transcribe.diarize import _overall_progress
+
+    value, _label = _overall_progress("finalize", completed=1, total=1)
+    assert value == 100.0
+
+
+def test_annotation_from_output_unwraps_diarize_output():
+    from local_whisper_transcribe.diarize import _annotation_from_output
+
+    class FakeAnnotation:
+        pass
+
+    class FakeOutput:
+        speaker_diarization = FakeAnnotation()
+
+    assert isinstance(_annotation_from_output(FakeOutput()), FakeAnnotation)
+    assert isinstance(_annotation_from_output(FakeAnnotation()), FakeAnnotation)
+
+
+def test_speechbrain_windows_patch_is_idempotent():
+    from local_whisper_transcribe.diarize import _patch_speechbrain_windows_inspect
+
+    _patch_speechbrain_windows_inspect()
+    _patch_speechbrain_windows_inspect()
+
+    try:
+        from speechbrain.utils.importutils import LazyModule
+    except Exception:
+        pytest.skip("speechbrain not importable in this environment")
+
+    assert getattr(LazyModule.ensure_module, "_lwt_windows_patch", False) is True
+
+
 def test_diarize_audio_requires_pyannote(monkeypatch):
     import builtins
 
@@ -73,12 +116,14 @@ def test_load_pipeline_access_error(monkeypatch):
     class FakePipeline:
         @staticmethod
         def from_pretrained(*_args, **_kwargs):
-            raise RuntimeError("403 Client Error: Cannot access gated repo")
+            raise RuntimeError(
+                "Could not download xvec_transform.npz from pyannote/speaker-diarization-community-1"
+            )
 
     monkeypatch.setattr("local_whisper_transcribe.diarize._require_pipeline", lambda: FakePipeline)
 
     with pytest.raises(DiarizationAccessError) as exc_info:
         _load_pipeline("hf_test")
 
+    assert "speaker-diarization-community-1" in str(exc_info.value)
     assert "speaker-diarization-3.1" in str(exc_info.value)
-    assert "segmentation-3.0" in str(exc_info.value)

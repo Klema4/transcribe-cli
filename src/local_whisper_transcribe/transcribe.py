@@ -48,16 +48,12 @@ def _is_cuda_runtime_error(exc: BaseException) -> bool:
 
 
 def _detect_device(device: str) -> str:
+    """Legacy helper — prefer ``device.resolve_device`` for shared Whisper/diarization."""
     if device != "auto":
         return device
-    try:
-        import ctranslate2
+    from local_whisper_transcribe.device import whisper_cuda_available
 
-        if ctranslate2.get_cuda_device_count() > 0:
-            return "cuda"
-    except Exception:
-        pass
-    return "cpu"
+    return "cuda" if whisper_cuda_available() else "cpu"
 
 
 def _resolve_compute_type(compute_type: str, device: str) -> str:

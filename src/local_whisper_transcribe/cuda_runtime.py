@@ -14,6 +14,13 @@ CUBLAS_PACKAGE = "nvidia-cublas-cu12"
 CUDNN_SPEC = "nvidia-cudnn-cu12>=9,<10"
 CUDA_TOOLKIT_WINGET_ID = "Nvidia.CUDA"
 CUBLAS_DLL = "cublas64_12.dll"
+# Match torchaudio wheels available for current Python (cu126 torch + cpu torchaudio).
+# CUDA torchaudio DLLs are often blocked by Windows Application Control; CPU torchaudio
+# is enough because we decode audio via ffmpeg and only need torchaudio for resample/fbank.
+TORCH_CUDA_INDEX = "https://download.pytorch.org/whl/cu126"
+TORCH_CUDA_PACKAGES = ("torch==2.11.0+cu126",)
+TORCHAUDIO_CPU_PACKAGES = ("torchaudio==2.11.0+cpu",)
+TORCHAUDIO_CPU_INDEX = "https://download.pytorch.org/whl/cpu"
 
 
 def get_cuda_install_hint() -> str:
@@ -112,16 +119,33 @@ def check_cuda_runtime() -> tuple[bool, str]:
 
     configure_cuda_dll_paths()
 
-    if is_cuda_runtime_installed():
-        return True, f"CUDA runtime ready ({count} GPU)"
+    whisper_ready = is_cuda_runtime_installed()
+    if not whisper_ready:
+        toolkit_bins = _windows_cuda_bin_dirs()
+        whisper_ready = bool(
+            toolkit_bins and any((path / CUBLAS_DLL).is_file() for path in toolkit_bins)
+        )
+
+    if not whisper_ready:
+        return False, (
+            f"GPU detected ({count}), but CUDA 12 libraries are missing "
+            f"({CUBLAS_DLL}). Run: {get_cuda_install_hint()}"
+        )
+
+    torch_ok = is_torch_cuda_installed()
+    if torch_ok:
+        return True, f"CUDA ready for Whisper + diarization ({count} GPU)"
 
     toolkit_bins = _windows_cuda_bin_dirs()
     if toolkit_bins and any((path / CUBLAS_DLL).is_file() for path in toolkit_bins):
-        return True, f"CUDA toolkit found ({count} GPU)"
+        return True, (
+            f"CUDA toolkit found for Whisper ({count} GPU); "
+            f"PyTorch is CPU-only — run `{get_cuda_install_hint()}` for GPU diarization"
+        )
 
-    return False, (
-        f"GPU detected ({count}), but CUDA 12 libraries are missing "
-        f"({CUBLAS_DLL}). Run: {get_cuda_install_hint()}"
+    return True, (
+        f"CUDA runtime ready for Whisper ({count} GPU); "
+        f"PyTorch is CPU-only — run `{get_cuda_install_hint()}` for GPU diarization"
     )
 
 
@@ -129,8 +153,9 @@ def _run_pip_install(
     packages: list[str],
     *,
     on_output: Callable[[str], None] | None = None,
+    extra_args: list[str] | None = None,
 ) -> int:
-    cmd = [sys.executable, "-m", "pip", "install", *packages]
+    cmd = [sys.executable, "-m", "pip", "install", *(extra_args or []), *packages]
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -144,12 +169,57 @@ def _run_pip_install(
     return proc.wait()
 
 
-def install_cuda_runtime(
+def is_torch_cuda_installed() -> bool:
+    """Return True if the installed PyTorch build reports CUDA available."""
+    configure_cuda_dll_paths()
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
+def install_torch_cuda(
     *,
     on_output: Callable[[str], None] | None = None,
 ) -> int:
-    """Install CUDA 12 cuBLAS/cuDNN wheels needed for GPU transcription."""
-    return _run_pip_install([CUBLAS_PACKAGE, CUDNN_SPEC], on_output=on_output)
+    """Install CUDA PyTorch for diarization GPU (+ CPU torchaudio for resample/fbank)."""
+    code = _run_pip_install(
+        list(TORCH_CUDA_PACKAGES),
+        on_output=on_output,
+        extra_args=["--upgrade", "--force-reinstall", "--index-url", TORCH_CUDA_INDEX],
+    )
+    if code != 0:
+        return code
+    if on_output:
+        on_output("Installing torchaudio (CPU build for resample/fbank)...")
+    return _run_pip_install(
+        list(TORCHAUDIO_CPU_PACKAGES),
+        on_output=on_output,
+        extra_args=[
+            "--upgrade",
+            "--force-reinstall",
+            "--index-url",
+            TORCHAUDIO_CPU_INDEX,
+        ],
+    )
+
+
+def install_cuda_runtime(
+    *,
+    on_output: Callable[[str], None] | None = None,
+    include_torch: bool = True,
+) -> int:
+    """Install CUDA 12 runtime for Whisper and (optionally) CUDA PyTorch for diarization."""
+    code = _run_pip_install([CUBLAS_PACKAGE, CUDNN_SPEC], on_output=on_output)
+    if code != 0:
+        return code
+    if include_torch:
+        if on_output:
+            on_output("Installing CUDA PyTorch (needed for GPU diarization)...")
+        code = install_torch_cuda(on_output=on_output)
+    return code
 
 
 def install_cuda_toolkit(
