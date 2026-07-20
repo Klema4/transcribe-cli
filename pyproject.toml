@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "local-whisper-transcribe"
+version = "0.1.0"
+description = "Local CLI tool for transcribing meetings from audio/video using faster-whisper"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "local-whisper-transcribe contributors" }]
+dependencies = [
+    "faster-whisper>=1.0.0",
+    "typer[all]>=0.12.0",
+    "rich>=13.0.0",
+    "httpx>=0.27.0",
+    "pydantic-settings>=2.0.0",
+    "tomli-w>=1.0.0",
+    "tomli>=2.0.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+diarization = [
+    "pyannote.audio>=3.1",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+]
+
+[project.scripts]
+lwt = "local_whisper_transcribe.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/local_whisper_transcribe"]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src/local_whisper_transcribe",
+    "tests",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
