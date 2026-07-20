@@ -26,7 +26,7 @@ def get_ollama_status(url: str, timeout: float = 5.0) -> OllamaStatus:
         return OllamaStatus(
             available=False,
             url=base,
-            error="Ollama není dostupná. Spusťte Ollama nebo zkontrolujte URL.",
+            error="Ollama is not available. Start Ollama or check the URL.",
         )
     try:
         response = httpx.get(f"{base}/api/tags", timeout=timeout)

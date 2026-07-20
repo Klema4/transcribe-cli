@@ -36,17 +36,17 @@ def run_setup_wizard(
     force: bool = False,
 ) -> None:
     """Run the full interactive setup wizard."""
-    console.print("[bold]Vítejte v průvodci nastavením lwt[/bold]")
-    console.print("Tento průvodce zkontroluje závislosti a uloží konfiguraci.\n")
+    console.print("[bold]Welcome to the lwt setup wizard[/bold]")
+    console.print("This wizard checks dependencies and saves your configuration.\n")
 
     config = load_config()
 
     # Python
     py_ok, py_version = check_python()
     if py_ok:
-        console.print(f"[green]✓[/green] Python {py_version}")
+        console.print(f"[green]OK[/green] Python {py_version}")
     else:
-        console.print(f"[red]✗[/red] Python {py_version} — vyžadováno Python 3.10+")
+        console.print(f"[red]FAIL[/red] Python {py_version} — Python 3.10+ required")
         raise typer.Exit(1)
 
     # ffmpeg
@@ -54,13 +54,13 @@ def run_setup_wizard(
 
     try:
         ffmpeg_path = check_ffmpeg()
-        console.print(f"[green]✓[/green] ffmpeg nalezen: [cyan]{ffmpeg_path}[/cyan]")
+        console.print(f"[green]OK[/green] ffmpeg found: [cyan]{ffmpeg_path}[/cyan]")
     except FFmpegNotFoundError:
         install_cmd = get_ffmpeg_install_command()
-        console.print("[red]✗[/red] ffmpeg není nainstalován nebo není v PATH.")
-        console.print(f"  Nainstalujte příkazem: [bold cyan]{install_cmd}[/bold cyan]")
+        console.print("[red]FAIL[/red] ffmpeg is not installed or not on PATH.")
+        console.print(f"  Install with: [bold cyan]{install_cmd}[/bold cyan]")
         if not ask_confirm(
-            "Pokračovat bez ffmpeg? (video soubory nebudou fungovat)",
+            "Continue without ffmpeg? (video files will not work)",
             default=False,
             console=console,
         ):
@@ -69,30 +69,30 @@ def run_setup_wizard(
     # CUDA
     cuda_ok, cuda_detail = check_cuda_runtime()
     if cuda_ok:
-        console.print(f"[green]✓[/green] {cuda_detail}")
+        console.print(f"[green]OK[/green] {cuda_detail}")
     else:
         console.print(f"[yellow]![/yellow] {cuda_detail}")
         if "lwt install cuda" in cuda_detail and ask_confirm(
-            "Nainstalovat CUDA 12 runtime knihovny nyní? (lwt install cuda)",
+            "Install CUDA 12 runtime libraries now? (lwt install cuda)",
             default=True,
             console=console,
         ):
-            with console.status("[bold green]Instaluji CUDA 12 runtime..."):
+            with console.status("[bold green]Installing CUDA 12 runtime..."):
                 code = install_cuda_runtime()
             if code == 0:
-                console.print("[green]✓[/green] CUDA 12 runtime nainstalován")
+                console.print("[green]OK[/green] CUDA 12 runtime installed")
                 runtime_ok, runtime_detail = check_cuda_runtime()
                 if runtime_ok:
-                    console.print(f"[green]✓[/green] {runtime_detail}")
+                    console.print(f"[green]OK[/green] {runtime_detail}")
             else:
-                console.print("[red]Instalace selhala.[/red] Zkuste: [cyan]lwt install cuda[/cyan]")
+                console.print("[red]Installation failed.[/red] Try: [cyan]lwt install cuda[/cyan]")
 
     # Whisper model
     console.print("\n[bold]Whisper model[/bold]")
     table = Table(show_header=True, header_style="bold green")
     table.add_column("Model", style="cyan")
-    table.add_column("Velikost")
-    table.add_column("Poznámka")
+    table.add_column("Size")
+    table.add_column("Notes")
     for name in KNOWN_MODELS:
         size, _ram, notes = MODEL_INFO.get(name, ("?", "?", ""))
         table.add_row(name, size, notes)
@@ -102,7 +102,7 @@ def run_setup_wizard(
     if model:
         selected = model
     else:
-        selected = ask_prompt("Vyberte model", default=default_model, console=console)
+        selected = ask_prompt("Choose a model", default=default_model, console=console)
     config["whisper"]["model"] = selected
 
     device = config["whisper"]["device"]
@@ -112,11 +112,11 @@ def run_setup_wizard(
     if already_cached and not force:
         status = get_model_status(selected)
         console.print(
-            f"[green]✓[/green] Model [cyan]{selected}[/cyan] už je stažený "
+            f"[green]OK[/green] Model [cyan]{selected}[/cyan] is already downloaded "
             f"([dim]{format_size(status.size_bytes)}[/dim])"
         )
         should_download = ask_confirm(
-            f"Přestáhnout model [cyan]{selected}[/cyan]?",
+            f"Re-download model [cyan]{selected}[/cyan]?",
             default=False,
             console=console,
         )
@@ -126,7 +126,7 @@ def run_setup_wizard(
         download_force = force
     else:
         should_download = ask_confirm(
-            f"Stáhnout model [cyan]{selected}[/cyan] nyní?",
+            f"Download model [cyan]{selected}[/cyan] now?",
             default=not already_cached,
             console=console,
         )
@@ -139,9 +139,9 @@ def run_setup_wizard(
             messages.append(message)
 
         status_label = (
-            f"Ověřuji model {selected}..."
+            f"Verifying model {selected}..."
             if already_cached and not download_force
-            else f"Stahuji model {selected}..."
+            else f"Downloading model {selected}..."
         )
         with console.status(f"[bold green]{status_label}"):
             download_model(
@@ -153,32 +153,32 @@ def run_setup_wizard(
             )
         for message in messages:
             console.print(f"  [dim]•[/dim] {message}")
-        console.print(f"[green]✓[/green] Model [cyan]{selected}[/cyan] připraven")
+        console.print(f"[green]OK[/green] Model [cyan]{selected}[/cyan] ready")
     elif already_cached:
-        console.print(f"[green]✓[/green] Model [cyan]{selected}[/cyan] připraven")
+        console.print(f"[green]OK[/green] Model [cyan]{selected}[/cyan] ready")
 
     language = ask_prompt(
-        "Výchozí jazyk (auto = automatická detekce)",
+        "Default language (auto = automatic detection)",
         default=config["defaults"]["language"],
         console=console,
     )
     config["defaults"]["language"] = language
 
     out_fmt = ask_prompt(
-        "Výchozí výstupní formát (txt/srt/vtt/json)",
+        "Default output format (txt/srt/vtt/json)",
         default=config["defaults"]["format"],
         console=console,
     )
     config["defaults"]["format"] = out_fmt
 
     # Diarization
-    console.print("\n[bold]Volitelně: Rozpoznání mluvčích (diarization)[/bold]")
+    console.print("\n[bold]Optional: Speaker diarization[/bold]")
     console.print(
-        f"Vyžaduje licenci na [link={HF_MODEL_URL}]{HF_MODEL_URL}[/link]\n"
-        "a HuggingFace token."
+        f"Requires accepting the license at [link={HF_MODEL_URL}]{HF_MODEL_URL}[/link]\n"
+        "and a HuggingFace token."
     )
     enable_diarization = ask_confirm(
-        "Nastavit rozpoznání mluvčích?",
+        "Set up speaker diarization?",
         default=config["diarization"]["enabled"],
         console=console,
     )
@@ -186,9 +186,9 @@ def run_setup_wizard(
 
     if enable_diarization:
         if not is_diarization_installed():
-            console.print("Balíček pyannote.audio není nainstalován.")
-            if ask_confirm("Nainstalovat nyní? (lwt install diarization)", default=True, console=console):
-                console.print("[bold]Instaluji pyannote.audio...[/bold]")
+            console.print("pyannote.audio is not installed.")
+            if ask_confirm("Install now? (lwt install diarization)", default=True, console=console):
+                console.print("[bold]Installing pyannote.audio...[/bold]")
                 progress = Progress(
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
@@ -203,49 +203,51 @@ def run_setup_wizard(
 
                     code = install_diarization(on_output=on_line)
                 if code != 0:
-                    console.print("[red]Instalace selhala.[/red] Zkuste: [cyan]lwt install diarization[/cyan]")
+                    console.print(
+                        "[red]Installation failed.[/red] Try: [cyan]lwt install diarization[/cyan]"
+                    )
                 else:
-                    console.print("[green]✓[/green] pyannote.audio nainstalován")
+                    console.print("[green]OK[/green] pyannote.audio installed")
 
         existing_token = get_hf_token(config) or ""
         token_default = existing_token
         token = ask_prompt(
-            "HuggingFace token (nechte prázdné pro přeskočení)",
+            "HuggingFace token (leave empty to skip)",
             default=token_default,
             password=bool(token_default),
             console=console,
         )
         config["diarization"]["hf_token"] = token
         if token:
-            console.print("[green]✓[/green] HF token uložen do konfigurace")
+            console.print("[green]OK[/green] HF token saved to configuration")
         else:
             console.print(
-                "[yellow]![/yellow] Token neuložen. Nastavte později:\n"
+                "[yellow]![/yellow] Token not saved. Set it later:\n"
                 "  [cyan]lwt config set diarization.hf_token <token>[/cyan]"
             )
 
     # Ollama
-    console.print("\n[bold]Volitelně: Ollama (překlad a shrnutí)[/bold]")
+    console.print("\n[bold]Optional: Ollama (translation and summarization)[/bold]")
     ollama_url = config["ollama"]["url"]
     status = get_ollama_status(ollama_url)
     if status.available:
-        console.print(f"[green]✓[/green] Ollama běží na {ollama_url}")
+        console.print(f"[green]OK[/green] Ollama is running at {ollama_url}")
         if status.models:
-            console.print(f"  Nainstalované modely: {', '.join(status.models)}")
+            console.print(f"  Installed models: {', '.join(status.models)}")
         else:
-            console.print("  [yellow]Žádné modely nenalezeny[/yellow]")
+            console.print("  [yellow]No models found[/yellow]")
     else:
-        console.print(f"[yellow]![/yellow] Ollama není dostupná na {ollama_url}")
-        console.print("  Spusťte Ollama nebo zkontrolujte: [cyan]lwt ollama status[/cyan]")
+        console.print(f"[yellow]![/yellow] Ollama is not available at {ollama_url}")
+        console.print("  Start Ollama or check: [cyan]lwt ollama status[/cyan]")
 
-    if status.available and ask_confirm("Nastavit výchozí Ollama model?", default=True, console=console):
+    if status.available and ask_confirm("Set default Ollama model?", default=True, console=console):
         default_ollama = config["ollama"]["model"]
         ollama_model = ask_prompt("Ollama model", default=default_ollama, console=console)
         config["ollama"]["model"] = ollama_model
 
         if ollama_model not in status.models:
             if ask_confirm(
-                f"Stáhnout model [cyan]{ollama_model}[/cyan]?",
+                f"Download model [cyan]{ollama_model}[/cyan]?",
                 default=True,
                 console=console,
             ):
@@ -257,7 +259,7 @@ def run_setup_wizard(
                     console=console,
                 )
                 with progress:
-                    task_id = progress.add_task(f"Stahuji {ollama_model}...", total=100)
+                    task_id = progress.add_task(f"Downloading {ollama_model}...", total=100)
 
                     def on_pull(msg: str, percent: int | None) -> None:
                         if percent is not None:
@@ -268,16 +270,16 @@ def run_setup_wizard(
                     try:
                         pull_ollama_model(ollama_model, ollama_url, on_progress=on_pull)
                         progress.update(task_id, completed=100)
-                        console.print(f"[green]✓[/green] Model [cyan]{ollama_model}[/cyan] stažen")
+                        console.print(f"[green]OK[/green] Model [cyan]{ollama_model}[/cyan] downloaded")
                     except Exception as exc:
-                        console.print(f"[red]Stažení selhalo:[/red] {exc}")
-                        console.print(f"Zkuste: [cyan]lwt ollama pull {ollama_model}[/cyan]")
+                        console.print(f"[red]Download failed:[/red] {exc}")
+                        console.print(f"Try: [cyan]lwt ollama pull {ollama_model}[/cyan]")
 
     config.setdefault("meta", {})["setup_complete"] = True
     save_config(config)
 
-    console.print("\n[bold green]✓ Nastavení dokončeno![/bold green]")
-    console.print(f"Konfigurace: [cyan]{get_config_path()}[/cyan]")
-    console.print("\nPříklad použití:")
+    console.print("\n[bold green]Setup complete![/bold green]")
+    console.print(f"Configuration: [cyan]{get_config_path()}[/cyan]")
+    console.print("\nExamples:")
     console.print("  [bold cyan]lwt transcribe meeting.mp4[/bold cyan]")
-    console.print("  [bold cyan]lwt transcribe schuzka.mp4 --diarize --summarize[/bold cyan]")
+    console.print("  [bold cyan]lwt transcribe meeting.mp4 --diarize --summarize[/bold cyan]")

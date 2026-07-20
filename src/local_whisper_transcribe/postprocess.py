@@ -70,8 +70,8 @@ def translate_text(
 ) -> str:
     """Translate text to the target language using Ollama."""
     prompt = (
-        f"Přelož následující text do jazyka {target_lang}. "
-        f"Vrať pouze překlad, bez komentářů a vysvětlení.\n\n"
+        f"Translate the following text into {target_lang}. "
+        f"Return only the translation, without comments or explanations.\n\n"
         f"Text:\n{text}"
     )
     return _ollama_generate(prompt, model=model, url=url, stream=stream, on_chunk=on_chunk)
@@ -87,14 +87,14 @@ def summarize_meeting(
 ) -> str:
     """Generate structured meeting notes from a transcript."""
     prompt = (
-        "Vytvoř strukturované zápisy ze schůzky na základě následujícího přepisu. "
-        "Použij tyto sekce:\n"
-        "1. Shrnutí (2-3 věty)\n"
-        "2. Klíčové body\n"
-        "3. Rozhodnutí\n"
-        "4. Akční body (kdo/co/kdy, pokud lze určit)\n"
-        "5. Otevřené otázky\n\n"
-        f"Přepis:\n{text}"
+        "Create structured meeting notes from the following transcript. "
+        "Use these sections:\n"
+        "1. Summary (2-3 sentences)\n"
+        "2. Key points\n"
+        "3. Decisions\n"
+        "4. Action items (who/what/when, if determinable)\n"
+        "5. Open questions\n\n"
+        f"Transcript:\n{text}"
     )
     return _ollama_generate(prompt, model=model, url=url, stream=stream, on_chunk=on_chunk)
 

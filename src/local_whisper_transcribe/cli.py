@@ -246,12 +246,12 @@ def _ensure_model_ready(model_name: str) -> None:
 
     console.print()
     console.print(
-        "[yellow]Model není stažen lokálně.[/yellow] "
-        "Spusťte [bold]lwt setup[/bold] nebo [bold]lwt models download "
+        "[yellow]Model is not downloaded locally.[/yellow] "
+        "Run [bold]lwt setup[/bold] or [bold]lwt models download "
         f"{model_name}[/bold]."
     )
 
-    if ask_confirm("Stáhnout model nyní?", default=True, console=console):
+    if ask_confirm("Download model now?", default=True, console=console):
         config = load_config()
         download_model(
             model_name,
@@ -278,11 +278,11 @@ def _print_diarization_hf_check(hf_token: str) -> bool:
         table.add_row(model_id, status)
     console.print(table)
     console.print(
-        "\n[red]Diarizace selže[/red] dokud nepřijmete licence u VŠECH modelů "
-        "(včetně [bold]speaker-diarization-community-1[/bold] — pyannote 4.x ho vyžaduje navíc).\n"
-        "Odkazy:\n"
+        "\n[red]Diarization will fail[/red] until you accept licenses for ALL models "
+        "(including [bold]speaker-diarization-community-1[/bold] — required by pyannote 4.x).\n"
+        "Links:\n"
         + "\n".join(f"  [cyan]https://huggingface.co/{m}[/cyan]" for m in HF_MODELS_TO_ACCEPT)
-        + "\n\nPoté: [cyan]lwt install verify-diarization[/cyan]"
+        + "\n\nThen run: [cyan]lwt install verify-diarization[/cyan]"
     )
     return False
 
@@ -302,14 +302,14 @@ def _resolve_hf_token(
         return None
 
     console.print(
-        "\n[yellow]Pro diarizaci je potřeba HuggingFace token.[/yellow]\n"
-        f"Přijměte licenci na {HF_MODEL_URL}"
+        "\n[yellow]Speaker diarization requires a HuggingFace token.[/yellow]\n"
+        f"Accept the license at {HF_MODEL_URL}"
     )
-    if ask_confirm("Zadat token nyní?", default=True, console=console):
+    if ask_confirm("Enter token now?", default=True, console=console):
         token = ask_prompt("HuggingFace token", password=True, console=console)
         if token:
             set_config_value("diarization.hf_token", token)
-            console.print("[green]✓[/green] Token uložen do konfigurace")
+            console.print("[green]OK[/green] Token saved to configuration")
             return token
     return None
 
@@ -345,23 +345,23 @@ def _run_transcribe(
     use_diarization = diarize or config["diarization"]["enabled"]
 
     if not input_file.exists():
-        console.print(f"[red]Error:[/red] Soubor nenalezen: {input_file}")
+        console.print(f"[red]Error:[/red] File not found: {input_file}")
         raise typer.Exit(1)
 
     if task not in ("transcribe", "translate"):
-        console.print("[red]Error:[/red] --task musí být 'transcribe' nebo 'translate'.")
+        console.print("[red]Error:[/red] --task must be 'transcribe' or 'translate'.")
         raise typer.Exit(1)
 
     if out_fmt not in ("txt", "srt", "vtt", "json"):
-        console.print(f"[red]Error:[/red] Nepodporovaný formát: {out_fmt}")
+        console.print(f"[red]Error:[/red] Unsupported format: {out_fmt}")
         raise typer.Exit(1)
 
     needs_ollama = bool(translate_to) or summarize
     if needs_ollama and not check_ollama_available(ollama_url):
         console.print(
-            f"[red]Error:[/red] Ollama není dostupná na {ollama_url}.\n"
-            "Spusťte Ollama nebo použijte: [bold cyan]lwt ollama status[/bold cyan]\n"
-            "Pro stažení modelu: [bold cyan]lwt ollama pull llama3.2[/bold cyan]"
+            f"[red]Error:[/red] Ollama is not available at {ollama_url}.\n"
+            "Start Ollama or run: [bold cyan]lwt ollama status[/bold cyan]\n"
+            "To download a model: [bold cyan]lwt ollama pull llama3.2[/bold cyan]"
         )
         raise typer.Exit(1)
 
@@ -369,22 +369,22 @@ def _run_transcribe(
         resolved_hf_token = _resolve_hf_token(config, hf_token)
         if not resolved_hf_token:
             console.print(
-                "[red]Error:[/red] Diarizace vyžaduje HuggingFace token.\n"
-                "Nastavte: [bold cyan]lwt config set diarization.hf_token <token>[/bold cyan]\n"
-                "Nebo spusťte: [bold cyan]lwt setup[/bold cyan]"
+                "[red]Error:[/red] Diarization requires a HuggingFace token.\n"
+                "Set: [bold cyan]lwt config set diarization.hf_token <token>[/bold cyan]\n"
+                "Or run: [bold cyan]lwt setup[/bold cyan]"
             )
             raise typer.Exit(1)
         if not is_diarization_installed():
             console.print(
-                "[red]Error:[/red] pyannote.audio není nainstalován.\n"
-                "Nainstalujte: [bold cyan]lwt install diarization[/bold cyan]"
+                "[red]Error:[/red] pyannote.audio is not installed.\n"
+                "Install: [bold cyan]lwt install diarization[/bold cyan]"
             )
-            if ask_confirm("Nainstalovat nyní?", default=True, console=console):
-                with console.status("[bold green]Instaluji pyannote.audio..."):
+            if ask_confirm("Install now?", default=True, console=console):
+                with console.status("[bold green]Installing pyannote.audio..."):
                     code = install_diarization(on_output=lambda _: None)
                 if code != 0:
                     raise typer.Exit(1)
-                console.print("[green]✓[/green] pyannote.audio nainstalován")
+                console.print("[green]OK[/green] pyannote.audio installed")
             else:
                 raise typer.Exit(1)
         if not _print_diarization_hf_check(resolved_hf_token):
@@ -429,9 +429,9 @@ def _run_transcribe(
 
     if not is_setup_complete() and not is_model_cached(model_name):
         console.print(
-            "[yellow]První spuštění?[/yellow] Doporučujeme: [bold cyan]lwt setup[/bold cyan]"
+            "[yellow]First run?[/yellow] We recommend: [bold cyan]lwt setup[/bold cyan]"
         )
-        if ask_confirm("Pokračovat s rychlým stažením modelu?", default=True, console=console):
+        if ask_confirm("Continue with quick model download?", default=True, console=console):
             _run_quick_setup(model=model_name, interactive=False)
         else:
             raise typer.Exit(1)
@@ -443,7 +443,7 @@ def _run_transcribe(
             def on_device_fallback(message: str) -> None:
                 console.print(f"[yellow]![/yellow] {message}")
 
-            with console.status("[bold green]Načítám Whisper model..."):
+            with console.status("[bold green]Loading Whisper model..."):
                 whisper_model = load_model(
                     model_name,
                     device=device,
@@ -467,7 +467,7 @@ def _run_transcribe(
                     progress.update(progress.tasks[0].id, completed=current, total=total)
 
             with progress:
-                task_id = progress.add_task("Přepisuji...", total=100)
+                task_id = progress.add_task("Transcribing...", total=100)
                 result_holder.append(
                     transcribe(
                         audio_path,
@@ -496,7 +496,7 @@ def _run_transcribe(
                     console=console,
                 )
                 with diarize_progress:
-                    diarize_task = diarize_progress.add_task("Diarizace...", total=100)
+                    diarize_task = diarize_progress.add_task("Diarization...", total=100)
 
                     def on_diarize_progress(
                         completed: float, total: float, description: str
@@ -505,7 +505,7 @@ def _run_transcribe(
                             diarize_task,
                             completed=completed,
                             total=total,
-                            description=f"Diarizace: {description}",
+                            description=f"Diarization: {description}",
                         )
 
                     diarization_segments = diarize_audio(
@@ -557,14 +557,14 @@ def _run_transcribe(
     extras: dict[str, Path] = {}
 
     if translate_to:
-        console.print(f"\n[bold]Překládám do {translate_to} přes Ollama...[/bold]")
+        console.print(f"\n[bold]Translating to {translate_to} via Ollama...[/bold]")
         translation_path = out_path.with_suffix(f".{translate_to}.txt")
         live_text = Text()
 
         def on_chunk(chunk: str) -> None:
             live_text.append(chunk)
 
-        with Live(Panel(live_text, title="Překlad"), console=console, refresh_per_second=8):
+        with Live(Panel(live_text, title="Translation"), console=console, refresh_per_second=8):
             translated = translate_text(
                 full_text,
                 translate_to,
@@ -577,14 +577,14 @@ def _run_transcribe(
         extras["translation"] = translation_path
 
     if summarize:
-        console.print("\n[bold]Generuji shrnutí schůzky přes Ollama...[/bold]")
+        console.print("\n[bold]Generating meeting summary via Ollama...[/bold]")
         summary_path = out_path.with_suffix(".summary.md")
         live_text = Text()
 
         def on_summary_chunk(chunk: str) -> None:
             live_text.append(chunk)
 
-        with Live(Panel(live_text, title="Shrnutí"), console=console, refresh_per_second=8):
+        with Live(Panel(live_text, title="Summary"), console=console, refresh_per_second=8):
             summary = summarize_meeting(
                 full_text,
                 model=ollama_llm,
@@ -595,18 +595,18 @@ def _run_transcribe(
         summary_path.write_text(summary, encoding="utf-8")
         extras["summary"] = summary_path
 
-    table = Table(title="Přepis dokončen", show_header=True, header_style="bold magenta")
-    table.add_column("Vlastnost", style="cyan")
-    table.add_column("Hodnota")
-    table.add_row("Vstup", str(input_file))
-    table.add_row("Výstup", str(out_path))
-    table.add_row("Jazyk", result.language)
-    table.add_row("Délka", f"{result.duration:.1f}s")
-    table.add_row("Segmenty", str(len(result.segments)))
+    table = Table(title="Transcription complete", show_header=True, header_style="bold magenta")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value")
+    table.add_row("Input", str(input_file))
+    table.add_row("Output", str(out_path))
+    table.add_row("Language", result.language)
+    table.add_row("Duration", f"{result.duration:.1f}s")
+    table.add_row("Segments", str(len(result.segments)))
     table.add_row("Model", model_name)
     if use_diarization:
         speakers = sorted({seg.speaker for seg in result.segments if seg.speaker})
-        table.add_row("Mluvčí", ", ".join(speakers) if speakers else "neznámí")
+        table.add_row("Speakers", ", ".join(speakers) if speakers else "unknown")
     for label, path in extras.items():
         table.add_row(label.capitalize(), str(path))
     console.print()
@@ -614,7 +614,7 @@ def _run_transcribe(
 
     if summarize and "summary" in extras:
         console.print()
-        console.print(Panel(Markdown(extras["summary"].read_text(encoding="utf-8")), title="Náhled shrnutí"))
+        console.print(Panel(Markdown(extras["summary"].read_text(encoding="utf-8")), title="Summary preview"))
 
 
 @app.callback(invoke_without_command=True)
@@ -631,8 +631,8 @@ def main(
         _print_banner()
         if not is_setup_complete():
             console.print(
-                "[yellow]První spuštění?[/yellow] Spusťte [bold cyan]lwt setup[/bold cyan] "
-                "pro první nastavení."
+                "[yellow]First run?[/yellow] Run [bold cyan]lwt setup[/bold cyan] "
+                "to get started."
             )
         console.print("Run [bold]lwt --help[/bold] for available commands.")
 
@@ -861,10 +861,10 @@ def install_diarization_cmd() -> None:
     """Install pyannote.audio for speaker diarization."""
     _print_banner()
     if is_diarization_installed():
-        console.print("[green]✓[/green] pyannote.audio je již nainstalován.")
+        console.print("[green]OK[/green] pyannote.audio is already installed.")
         return
 
-    console.print("[bold]Instaluji pyannote.audio...[/bold]")
+    console.print("[bold]Installing pyannote.audio...[/bold]")
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -880,11 +880,11 @@ def install_diarization_cmd() -> None:
         code = install_diarization(on_output=on_line)
 
     if code != 0:
-        console.print("[red]Instalace selhala.[/red]")
+        console.print("[red]Installation failed.[/red]")
         raise typer.Exit(1)
 
-    console.print("[green]✓[/green] pyannote.audio nainstalován.")
-    console.print("Přijměte licence u VŠECH 4 modelů (viz [cyan]lwt install verify-diarization[/cyan]):")
+    console.print("[green]OK[/green] pyannote.audio installed.")
+    console.print("Accept licenses for ALL 4 models (see [cyan]lwt install verify-diarization[/cyan]):")
     for model_id in HF_MODELS_TO_ACCEPT:
         console.print(f"  [cyan]https://huggingface.co/{model_id}[/cyan]")
     console.print("Token: [cyan]lwt config set diarization.hf_token <token>[/cyan]")
@@ -902,16 +902,18 @@ def verify_diarization_cmd(
     token = get_hf_token(config, hf_token)
     if not token:
         console.print(
-            "[red]Chybí HuggingFace token.[/red]\n"
-            "Nastavte: [cyan]lwt config set diarization.hf_token <token>[/cyan]"
+            "[red]Missing HuggingFace token.[/red]\n"
+            "Set: [cyan]lwt config set diarization.hf_token <token>[/cyan]"
         )
         raise typer.Exit(1)
 
     if not is_diarization_installed():
-        console.print("[yellow]pyannote.audio není nainstalován.[/yellow] Spusťte: lwt install diarization")
+        console.print("[yellow]pyannote.audio is not installed.[/yellow] Run: lwt install diarization")
         raise typer.Exit(1)
 
-    console.print("[dim]torchcodec varování při importu pyannote je normální — audio řešíme přes ffmpeg.[/dim]\n")
+    console.print(
+        "[dim]torchcodec warnings when importing pyannote are normal — we handle audio via ffmpeg.[/dim]\n"
+    )
 
     results = verify_diarization_access(token)
     table = Table(title="HuggingFace model access", show_header=True)
@@ -930,25 +932,25 @@ def verify_diarization_cmd(
     console.print(table)
 
     if all_ok:
-        console.print("\n[green]OK[/green] Vsechny modely dostupne. Diarizace by mela fungovat.")
-        with console.status("[bold green]Testuji nacitani pipeline..."):
+        console.print("\n[green]OK[/green] All models accessible. Diarization should work.")
+        with console.status("[bold green]Testing pipeline load..."):
             try:
                 from local_whisper_transcribe.diarize import _load_pipeline
 
                 _load_pipeline(token)
             except DiarizationAccessError as exc:
-                console.print(f"\n[red]Pipeline selhala:[/red] {exc}")
+                console.print(f"\n[red]Pipeline failed:[/red] {exc}")
                 raise typer.Exit(1) from exc
             except Exception as exc:
-                console.print(f"\n[red]Pipeline selhala:[/red] {exc}")
+                console.print(f"\n[red]Pipeline failed:[/red] {exc}")
                 raise typer.Exit(1) from exc
-        console.print("[green]OK[/green] Pipeline se nacetla.")
+        console.print("[green]OK[/green] Pipeline loaded.")
         return
 
     console.print(
-        "\n[red]Chybí přístup k jednomu nebo více modelům.[/red]\n"
-        "U každého FAIL odkazu klikněte [bold]Agree and access repository[/bold].\n"
-        "Často chybí 4. model: [cyan]pyannote/speaker-diarization-community-1[/cyan]"
+        "\n[red]Missing access to one or more models.[/red]\n"
+        "For each FAIL link, click [bold]Agree and access repository[/bold].\n"
+        "Often missing: 4th model [cyan]pyannote/speaker-diarization-community-1[/cyan]"
     )
     raise typer.Exit(1)
 
@@ -978,16 +980,16 @@ def ollama_status_cmd() -> None:
     status = get_ollama_status(config["ollama"]["url"])
 
     if status.available:
-        console.print(f"[green]✓[/green] Ollama běží na [cyan]{status.url}[/cyan]")
+        console.print(f"[green]OK[/green] Ollama is running at [cyan]{status.url}[/cyan]")
         if status.models:
-            console.print(f"Modely: {', '.join(status.models)}")
+            console.print(f"Models: {', '.join(status.models)}")
         else:
-            console.print("[yellow]Žádné modely nenalezeny.[/yellow] Stáhněte: [cyan]lwt ollama pull llama3.2[/cyan]")
+            console.print("[yellow]No models found.[/yellow] Pull one: [cyan]lwt ollama pull llama3.2[/cyan]")
     else:
-        console.print(f"[red]✗[/red] Ollama není dostupná na {status.url}")
+        console.print(f"[red]FAIL[/red] Ollama is not available at {status.url}")
         if status.error:
             console.print(f"  {status.error}")
-        console.print("Spusťte Ollama a zkuste znovu.")
+        console.print("Start Ollama and try again.")
 
 
 @ollama_app.command("list")
@@ -997,8 +999,8 @@ def ollama_list_cmd() -> None:
     config = load_config()
     models = list_ollama_models(config["ollama"]["url"])
     if not models:
-        console.print("[yellow]Žádné modely nenalezeny.[/yellow]")
-        console.print("Stáhněte model: [cyan]lwt ollama pull llama3.2[/cyan]")
+        console.print("[yellow]No models found.[/yellow]")
+        console.print("Pull a model: [cyan]lwt ollama pull llama3.2[/cyan]")
         return
 
     table = Table(title="Ollama Models", show_header=True, header_style="bold green")
@@ -1019,8 +1021,8 @@ def ollama_pull_cmd(
 
     if not check_ollama_available(url):
         console.print(
-            f"[red]Error:[/red] Ollama není dostupná na {url}.\n"
-            "Spusťte Ollama a zkuste: [cyan]lwt ollama status[/cyan]"
+            f"[red]Error:[/red] Ollama is not available at {url}.\n"
+            "Start Ollama and try: [cyan]lwt ollama status[/cyan]"
         )
         raise typer.Exit(1)
 
@@ -1033,7 +1035,7 @@ def ollama_pull_cmd(
         console=console,
     )
     with progress:
-        task_id = progress.add_task(f"Stahuji {model}...", total=100)
+        task_id = progress.add_task(f"Pulling {model}...", total=100)
 
         def on_pull(msg: str, percent: int | None) -> None:
             if percent is not None:
@@ -1048,7 +1050,7 @@ def ollama_pull_cmd(
             console.print(f"[red]Error:[/red] {exc}")
             raise typer.Exit(1) from exc
 
-    console.print(f"[green]✓[/green] Model [cyan]{model}[/cyan] stažen.")
+    console.print(f"[green]OK[/green] Model [cyan]{model}[/cyan] pulled.")
 
 
 @models_app.command("list")
@@ -1089,7 +1091,7 @@ def models_download(
     for message in messages:
         console.print(f"  [dim]•[/dim] {message}")
 
-    console.print(f"[green]✓[/green] Model [bold]{name}[/bold] ready at [cyan]{path}[/cyan]")
+    console.print(f"[green]OK[/green] Model [bold]{name}[/bold] ready at [cyan]{path}[/cyan]")
 
 
 @models_app.command("status")
@@ -1137,7 +1139,7 @@ def config_set(
         display = value
         if key == "diarization.hf_token":
             display = mask_config_value("diarization", "hf_token", value)
-        console.print(f"[green]✓[/green] Set [bold]{key}[/bold] = [cyan]{display}[/cyan]")
+        console.print(f"[green]OK[/green] Set [bold]{key}[/bold] = [cyan]{display}[/cyan]")
     except ValueError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
@@ -1157,14 +1159,14 @@ def config_reset_cmd(
 ) -> None:
     """Reset configuration to defaults."""
     if not yes and not ask_confirm(
-        "Resetovat konfiguraci na výchozí hodnoty?",
+        "Reset configuration to default values?",
         default=False,
         console=console,
     ):
         raise typer.Exit()
     reset_config()
-    console.print("[green]✓[/green] Konfigurace resetována.")
-    console.print(f"Soubor: [cyan]{get_config_path()}[/cyan]")
+    console.print("[green]OK[/green] Configuration reset.")
+    console.print(f"File: [cyan]{get_config_path()}[/cyan]")
 
 
 if __name__ == "__main__":
