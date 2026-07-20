@@ -1,6 +1,6 @@
 # local-whisper-transcribe
 
-Local CLI tool (`lwt`) for transcribing meetings from audio and video files using [faster-whisper](https://github.com/SYSTRAN/faster-whisper). All processing runs **100% offline** on your machine. Optional translation, summarization, and speaker diarization also run locally.
+Local CLI tool (`lwt`) for transcribing meetings from audio and video files using [faster-whisper](https://github.com/SYSTRAN/faster-whisper). All processing runs **100% offline** on your machine. Optional AI transcript cleaning, translation, summarization, and speaker diarization also run locally.
 
 **Everything is controlled exclusively through the `lwt` command** — no manual pip extras, environment variables, or `huggingface-cli` required.
 
@@ -19,7 +19,7 @@ Local CLI tool (`lwt`) for transcribing meetings from audio and video files usin
 - [All commands](#all-commands)
 - [Speaker diarization](#speaker-diarization)
   - [HuggingFace setup for diarization](#huggingface-setup-for-diarization)
-- [Ollama (translation & summarization)](#ollama-translation--summarization)
+- [Ollama (translation, summarization & cleaning)](#ollama-translation-summarization--cleaning)
 - [Model recommendations](#model-recommendations)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
@@ -34,6 +34,7 @@ Local CLI tool (`lwt`) for transcribing meetings from audio and video files usin
 - Automatic language detection or manual selection (`--language cs`)
 - GPU acceleration via CUDA (automatic fallback to CPU)
 - Voice Activity Detection (VAD) for cleaner segments
+- Optional **AI transcript cleaning** via Ollama (`--clean`) — removes filler words and fixes obvious speech-to-text errors
 - Optional translation and structured meeting summary via local [Ollama](https://ollama.com)
 - Optional speaker diarization via [pyannote.audio](https://github.com/pyannote/pyannote-audio)
 - Rich terminal UI with progress bars, tables, and colored output
@@ -47,7 +48,7 @@ Local CLI tool (`lwt`) for transcribing meetings from audio and video files usin
 | **Python 3.10+** | yes | `python --version` |
 | **ffmpeg** | yes | Extracts audio from video files |
 | **CUDA / NVIDIA GPU** | no | Speeds up transcription |
-| **Ollama** | no | Translation and summarization |
+| **Ollama** | no | Transcript cleaning (`--clean`), translation (`--translate-to`), and summarization (`--summarize`) |
 | **HuggingFace account + token** | no | Required for speaker diarization only (see [HuggingFace setup](#huggingface-setup-for-diarization)) |
 
 ### Installing ffmpeg
@@ -127,7 +128,7 @@ The wizard will:
 2. Show a table of Whisper models (size, RAM, recommendations)
 3. Let you pick and download a model
 4. Optionally configure diarization (requires [HuggingFace setup](#huggingface-setup-for-diarization))
-5. Optionally check Ollama and pull an LLM model
+5. Optionally check Ollama and pull an LLM model (used for `--clean`, `--translate-to`, and `--summarize`)
 
 Quick variants (model download only):
 
@@ -177,6 +178,30 @@ lwt transcribe video.mp4 --format vtt -o subtitles.vtt
 lwt transcribe meeting.mp4 --format json -o output.json
 ```
 
+### Clean transcript with AI (via Ollama)
+
+Use `--clean` to post-process the transcript with your configured Ollama model (set during `lwt setup` or via `lwt config set ollama.model`):
+
+```bash
+lwt ollama pull llama3.2
+lwt transcribe meeting.mp4 --clean
+```
+
+What it does:
+
+- Removes filler words and hesitations (`hm`, `eh`, `jo jo jo`, repeated words, …)
+- Fixes obvious speech-to-text errors using context (e.g. garbled nonsense → the intended word)
+- Preserves segment boundaries and timestamps (SRT/VTT stay in sync)
+- Saves the **original** transcript as `meeting.raw.txt` (or `.raw.srt`, `.raw.json`, …) next to the cleaned output
+
+The default Ollama model is read from your config (`ollama.model`). Override per run with `--ollama-model`:
+
+```bash
+lwt transcribe meeting.mp4 --clean --ollama-model mistral
+```
+
+Requires a running Ollama instance (`lwt ollama status`).
+
 ### Translate to another language (via Ollama)
 
 ```bash
@@ -215,10 +240,17 @@ lwt transcribe meeting.mp4 \
   --language en \
   --diarize \
   --speaker-names "Alice,Bob" \
+  --clean \
   --summarize \
   --format txt \
   -o meeting-notes.txt
 ```
+
+This produces:
+
+- `meeting-notes.txt` — cleaned transcript
+- `meeting-notes.raw.txt` — original Whisper output (because of `--clean`)
+- `meeting-notes.summary.md` — meeting summary (because of `--summarize`)
 
 ---
 
@@ -241,9 +273,10 @@ lwt t <file>                       # alias
   --num-speakers       Number of speakers (hint for diarization)
   --speaker-names      Comma-separated speaker names
   --hf-token           HuggingFace token for diarization
+  --clean              Clean transcript via Ollama (fillers + ASR fixes; uses ollama.model from config)
   --translate-to       Translate to language via Ollama
   --summarize          Structured summary via Ollama
-  --ollama-model       Ollama model for post-processing
+  --ollama-model       Ollama model for --clean, --translate-to, and --summarize
 ```
 
 ### Setup & onboarding
@@ -384,20 +417,34 @@ lwt transcribe meeting.wav --diarize --hf-token hf_xxx
 
 ---
 
-## Ollama (translation & summarization)
+## Ollama (translation, summarization & cleaning)
 
-Whisper natively translates only to English (`--task translate`). For translation to any language or meeting summarization, use local Ollama:
+Whisper natively translates only to English (`--task translate`). For AI transcript cleaning, translation to any language, or meeting summarization, use local Ollama:
 
 1. Install and start [Ollama](https://ollama.com)
 2. Pull a model: `lwt ollama pull llama3.2`
-3. Transcribe with flags:
+3. Set it as default (or choose during `lwt setup`):
 
 ```bash
-lwt transcribe meeting.mp4 --translate-to Czech
-lwt transcribe meeting.mp4 --summarize
+lwt config set ollama.model llama3.2
 ```
 
-Set the default Ollama model via `lwt config set ollama.model llama3.2` or during `lwt setup`.
+4. Transcribe with flags:
+
+```bash
+lwt transcribe meeting.mp4 --clean
+lwt transcribe meeting.mp4 --translate-to Czech
+lwt transcribe meeting.mp4 --summarize
+lwt transcribe meeting.mp4 --clean --summarize
+```
+
+| Flag | What it does | Extra output |
+|------|----------------|--------------|
+| `--clean` | Remove fillers, fix obvious ASR errors | `*.raw.*` backup of original transcript |
+| `--translate-to` | Translate full transcript | `*.<lang>.txt` |
+| `--summarize` | Structured meeting notes | `*.summary.md` |
+
+All three use the same Ollama model: `ollama.model` from config, unless you pass `--ollama-model`.
 
 ---
 
@@ -495,10 +542,18 @@ lwt models download small
 
 ### Ollama not running
 
+Required when using `--clean`, `--translate-to`, or `--summarize`:
+
 ```bash
 lwt ollama status
 # Start the Ollama app, then:
 lwt ollama pull llama3.2
+```
+
+If you only need raw transcription, omit those flags:
+
+```bash
+lwt transcribe meeting.mp4
 ```
 
 ### Diarization failing (403 / gated repo)
@@ -574,7 +629,7 @@ src/local_whisper_transcribe/
 ├── audio.py          # ffmpeg audio extraction
 ├── output.py         # TXT/SRT/VTT/JSON export
 ├── diarize.py        # pyannote diarization
-├── postprocess.py    # Ollama translation & summarization
+├── postprocess.py    # Ollama cleaning, translation & summarization
 ├── models.py         # Whisper model management
 ├── config.py         # TOML configuration
 ├── setup_wizard.py   # interactive onboarding

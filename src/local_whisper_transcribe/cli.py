@@ -68,6 +68,7 @@ from local_whisper_transcribe.ollama_ops import get_ollama_status, list_ollama_m
 from local_whisper_transcribe.output import default_output_path, export_result, format_txt
 from local_whisper_transcribe.postprocess import (
     check_ollama_available,
+    clean_transcript_segments,
     summarize_meeting,
     translate_text,
 )
@@ -324,6 +325,7 @@ def _run_transcribe(
     output: Path | None,
     translate_to: str | None,
     summarize: bool,
+    clean: bool,
     ollama_model: str | None,
     task: str,
     diarize: bool = False,
@@ -356,12 +358,14 @@ def _run_transcribe(
         console.print(f"[red]Error:[/red] Unsupported format: {out_fmt}")
         raise typer.Exit(1)
 
-    needs_ollama = bool(translate_to) or summarize
+    needs_ollama = bool(translate_to) or summarize or clean
     if needs_ollama and not check_ollama_available(ollama_url):
+        clean_hint = "\nFor --clean: Ollama uses your configured model from [bold cyan]lwt setup[/bold cyan]." if clean else ""
         console.print(
             f"[red]Error:[/red] Ollama is not available at {ollama_url}.\n"
             "Start Ollama or run: [bold cyan]lwt ollama status[/bold cyan]\n"
-            "To download a model: [bold cyan]lwt ollama pull llama3.2[/bold cyan]"
+            f"To download a model: [bold cyan]lwt ollama pull {ollama_llm}[/bold cyan]"
+            f"{clean_hint}"
         )
         raise typer.Exit(1)
 
@@ -545,6 +549,52 @@ def _run_transcribe(
         raise typer.Exit(1) from exc
 
     out_path = _resolve_output_path(input_file, output, output_dir, out_fmt)
+    extras: dict[str, Path] = {}
+
+    if clean:
+        raw_path = out_path.with_stem(f"{out_path.stem}.raw")
+        export_result(
+            result,
+            raw_path,
+            out_fmt,
+            with_timestamps=(out_fmt == "txt"),
+            source=str(input_file),
+        )
+        extras["raw"] = raw_path
+
+        console.print(
+            f"\n[bold]Cleaning transcript via Ollama ({ollama_llm})...[/bold]"
+        )
+        clean_progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            console=console,
+        )
+        with clean_progress:
+            task_id = clean_progress.add_task("Cleaning...", total=100)
+
+            def on_clean_progress(batch_num: int, total_batches: int) -> None:
+                clean_progress.update(
+                    task_id,
+                    completed=int(batch_num / total_batches * 100),
+                    description=f"Cleaning batch {batch_num}/{total_batches}...",
+                )
+
+            result.segments = clean_transcript_segments(
+                result.segments,
+                language=result.language,
+                model=ollama_llm,
+                url=ollama_url,
+                on_progress=on_clean_progress,
+            )
+            clean_progress.update(task_id, completed=100)
+
+        result.metadata["cleaned"] = True
+        result.metadata["clean_ollama_model"] = ollama_llm
+
     export_result(
         result,
         out_path,
@@ -554,7 +604,6 @@ def _run_transcribe(
     )
 
     full_text = format_txt(result.segments, with_speakers=use_diarization)
-    extras: dict[str, Path] = {}
 
     if translate_to:
         console.print(f"\n[bold]Translating to {translate_to} via Ollama...[/bold]")
@@ -607,6 +656,8 @@ def _run_transcribe(
     if use_diarization:
         speakers = sorted({seg.speaker for seg in result.segments if seg.speaker})
         table.add_row("Speakers", ", ".join(speakers) if speakers else "unknown")
+    if clean:
+        table.add_row("Cleaned", f"yes ({ollama_llm})")
     for label, path in extras.items():
         table.add_row(label.capitalize(), str(path))
     console.print()
@@ -661,6 +712,13 @@ def transcribe_cmd(
     summarize: Annotated[
         bool, typer.Option("--summarize", help="Generate meeting summary via Ollama.")
     ] = False,
+    clean: Annotated[
+        bool,
+        typer.Option(
+            "--clean",
+            help="Clean transcript via Ollama (remove fillers, fix ASR errors). Uses your configured Ollama model.",
+        ),
+    ] = False,
     ollama_model: Annotated[
         Optional[str], typer.Option("--ollama-model", help="Ollama model for post-processing.")
     ] = None,
@@ -691,6 +749,7 @@ def transcribe_cmd(
         output=output,
         translate_to=translate_to,
         summarize=summarize,
+        clean=clean,
         ollama_model=ollama_model,
         task=task,
         diarize=diarize,
@@ -710,6 +769,7 @@ def transcribe_short(
     output: Annotated[Optional[Path], typer.Option("--output", "-o")] = None,
     translate_to: Annotated[Optional[str], typer.Option("--translate-to")] = None,
     summarize: Annotated[bool, typer.Option("--summarize")] = False,
+    clean: Annotated[bool, typer.Option("--clean")] = False,
     ollama_model: Annotated[Optional[str], typer.Option("--ollama-model")] = None,
     task: Annotated[str, typer.Option("--task")] = "transcribe",
     diarize: Annotated[bool, typer.Option("--diarize")] = False,
@@ -727,6 +787,7 @@ def transcribe_short(
         output=output,
         translate_to=translate_to,
         summarize=summarize,
+        clean=clean,
         ollama_model=ollama_model,
         task=task,
         diarize=diarize,
