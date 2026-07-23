@@ -1,4 +1,4 @@
-# local-whisper-transcribe
+# Transcribe CLI
 
 Local CLI tool (`lwt`) for transcribing meetings from audio and video files using [faster-whisper](https://github.com/SYSTRAN/faster-whisper). All processing runs **100% offline** on your machine. Optional AI transcript cleaning, translation, summarization, and speaker diarization also run locally.
 
