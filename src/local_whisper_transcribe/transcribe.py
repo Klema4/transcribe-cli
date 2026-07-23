@@ -82,6 +82,28 @@ def _resolve_cpu_threads(device: str, cpu_threads: int | None) -> int | None:
     return min(8, max(1, cpu_count - 1))
 
 
+def _is_apple_silicon() -> bool:
+    return (
+        platform.system() == "Darwin"
+        and platform.machine().lower() in {"arm64", "arm64e", "aarch64"}
+    )
+
+
+def _resolve_num_workers(device: str, num_workers: int | None) -> int | None:
+    if num_workers is not None:
+        return num_workers
+    if device != "cpu":
+        return None
+    if not _is_apple_silicon():
+        return None
+
+    # Apple Silicon benefits from modest decode parallelism for long files.
+    cpu_count = os.cpu_count() or 1
+    if cpu_count <= 2:
+        return 1
+    return min(4, max(1, cpu_count // 2))
+
+
 def _build_model_kwargs(
     cpu_threads: int | None,
     num_workers: int | None,
@@ -108,11 +130,12 @@ def load_model(
     resolved_device = _detect_device(device)
     resolved_compute = _resolve_compute_type(compute_type, resolved_device)
     resolved_cpu_threads = _resolve_cpu_threads(resolved_device, cpu_threads)
+    resolved_num_workers = _resolve_num_workers(resolved_device, num_workers)
     model_kwargs = {
         "device": resolved_device,
         "compute_type": resolved_compute,
     }
-    model_kwargs.update(_build_model_kwargs(resolved_cpu_threads, num_workers))
+    model_kwargs.update(_build_model_kwargs(resolved_cpu_threads, resolved_num_workers))
 
     try:
         return WhisperModel(model, **model_kwargs)
@@ -133,7 +156,10 @@ def load_model(
             model,
             device="cpu",
             compute_type=cpu_compute,
-            **_build_model_kwargs(_resolve_cpu_threads("cpu", cpu_threads), num_workers),
+            **_build_model_kwargs(
+                _resolve_cpu_threads("cpu", cpu_threads),
+                _resolve_num_workers("cpu", num_workers),
+            ),
         )
 
 

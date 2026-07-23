@@ -17,8 +17,8 @@ Legacy path `~/.config/local-whisper-transcribe/` is still loaded if present.
 model = "small"
 device = "auto"          # auto | cuda | cpu
 compute_type = "auto"
-cpu_threads = "auto"     # auto | integer (Apple Silicon auto => CPU-bound threads tuned for M1/M2/M3/M4)
-num_workers = "auto"     # auto | integer (decode workers, auto keeps default)
+cpu_threads = "auto"     # auto | integer (Apple Silicon auto => CPU-bound threads tuned for M1/M2/M3/M4/M5)
+num_workers = "auto"     # auto | integer (Apple Silicon auto => half of logical cores, capped at 4)
 beam_size = 5            # decoding beam, lower = faster
 condition_on_previous_text = true
 vad_filter = true
