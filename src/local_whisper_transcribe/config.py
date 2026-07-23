@@ -14,7 +14,8 @@ else:
 
 import tomli_w
 
-CONFIG_DIR_NAME = "local-whisper-transcribe"
+CONFIG_DIR_NAME = "transcribe-cli"
+LEGACY_CONFIG_DIR_NAME = "local-whisper-transcribe"
 CONFIG_FILE_NAME = "config.toml"
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -42,9 +43,26 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def _config_dir(name: str = CONFIG_DIR_NAME) -> Path:
+    return Path.home() / ".config" / name
+
+
 def get_config_path() -> Path:
-    """Return the path to the user config file."""
-    return Path.home() / ".config" / CONFIG_DIR_NAME / CONFIG_FILE_NAME
+    """Return the path to the user config file.
+
+    Prefers ``~/.config/transcribe-cli/``. If that does not exist yet but a
+    legacy ``~/.config/local-whisper-transcribe/`` config does, keep using it
+    so existing installs are not reset.
+    """
+    current = _config_dir(CONFIG_DIR_NAME) / CONFIG_FILE_NAME
+    if current.exists():
+        return current
+
+    legacy = _config_dir(LEGACY_CONFIG_DIR_NAME) / CONFIG_FILE_NAME
+    if legacy.exists():
+        return legacy
+
+    return current
 
 
 def config_exists() -> bool:

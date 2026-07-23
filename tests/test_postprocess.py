@@ -66,11 +66,25 @@ def test_clean_transcript_segments_keeps_original_on_missing_line():
     assert cleaned[0].text == "original"
 
 
+def test_clean_transcript_segments_calls_preview():
+    segments = [Segment(start=0.0, end=1.0, text="hm test")]
+
+    with patch(
+        "local_whisper_transcribe.postprocess._clean_segment_batch",
+        return_value={0: "test"},
+    ):
+        previews: list[str] = []
+        clean_transcript_segments(segments, on_preview=previews.append)
+
+    assert any("hm test" in line for line in previews)
+    assert any("test" in line for line in previews)
+
+
 def test_clean_transcript_segments_calls_progress():
     segments = [
         Segment(start=0.0, end=1.0, text="a"),
         Segment(start=1.0, end=2.0, text="b"),
-        Segment(start=2.0, end=3.0, text="c"),
+        Segment(start=3.0, end=4.0, text="c"),
     ]
     progress_calls: list[tuple[int, int]] = []
 
@@ -85,3 +99,30 @@ def test_clean_transcript_segments_calls_progress():
         )
 
     assert progress_calls == [(1, 2), (2, 2)]
+
+
+def test_clean_transcript_segments_calls_batch_complete():
+    segments = [
+        Segment(start=0.0, end=1.0, text="a"),
+        Segment(start=1.0, end=2.0, text="b"),
+        Segment(start=2.0, end=3.0, text="c"),
+    ]
+    snapshots: list[list[str]] = []
+
+    def fake_batch(batch, *, language, model, url):
+        return {idx: f"cleaned-{idx}" for idx, _ in batch}
+
+    with patch(
+        "local_whisper_transcribe.postprocess._clean_segment_batch",
+        side_effect=fake_batch,
+    ):
+        clean_transcript_segments(
+            segments,
+            batch_size=2,
+            on_batch_complete=lambda cleaned, _batch, _total: snapshots.append(
+                [seg.text for seg in cleaned]
+            ),
+        )
+
+    assert snapshots[0] == ["cleaned-0", "cleaned-1", "c"]
+    assert snapshots[1] == ["cleaned-0", "cleaned-1", "cleaned-2"]

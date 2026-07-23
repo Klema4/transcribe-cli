@@ -196,6 +196,8 @@ def clean_transcript_segments(
     url: str = DEFAULT_OLLAMA_URL,
     batch_size: int = CLEAN_BATCH_SIZE,
     on_progress: Callable[[int, int], None] | None = None,
+    on_preview: Callable[[str], None] | None = None,
+    on_batch_complete: Callable[[list[Segment], int, int], None] | None = None,
 ) -> list[Segment]:
     """Clean transcript segments via Ollama while preserving segment boundaries."""
     if not segments:
@@ -210,6 +212,17 @@ def clean_transcript_segments(
 
         end = min(start + batch_size, len(segments))
         batch = [(idx, segments[idx].text) for idx in range(start, end)]
+
+        if on_preview and batch:
+            first_idx, first_text = batch[0]
+            last_idx = end - 1
+            if first_idx == last_idx:
+                on_preview(f"> [{first_idx + 1}/{len(segments)}] {first_text}")
+            else:
+                on_preview(
+                    f"> [{first_idx + 1}-{last_idx + 1}/{len(segments)}] {first_text}"
+                )
+
         updates = _clean_segment_batch(
             batch,
             language=language,
@@ -218,7 +231,13 @@ def clean_transcript_segments(
         )
 
         for idx in range(start, end):
+            new_text = updates.get(idx) or segments[idx].text
+            if on_preview:
+                on_preview(f"[{idx + 1}/{len(segments)}] {new_text}")
             if idx in updates and updates[idx]:
                 cleaned[idx] = replace(cleaned[idx], text=updates[idx])
+
+        if on_batch_complete:
+            on_batch_complete(cleaned, batch_num, total_batches)
 
     return cleaned

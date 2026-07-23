@@ -273,7 +273,8 @@ def _overall_progress(
 
     if completed is not None and total and total > 0 and weight > 0:
         fraction = min(1.0, max(0.0, float(completed) / float(total)))
-        return (start + weight * fraction) * 100.0, label
+        pct = int(fraction * 100)
+        return (start + weight * fraction) * 100.0, f"{label} ({pct}%)"
 
     # Step finished (no intra-step progress) → advance to end of this stage.
     return (start + weight) * 100.0, label

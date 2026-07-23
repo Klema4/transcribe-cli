@@ -13,8 +13,8 @@
 ## Install the package
 
 ```bash
-git clone https://github.com/Klema4/local-whisper-transcribe.git
-cd local-whisper-transcribe
+git clone https://github.com/Klema4/transcribe-cli.git
+cd transcribe-cli
 pip install -e .
 lwt --help
 ```

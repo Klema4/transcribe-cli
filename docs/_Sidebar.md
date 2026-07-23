@@ -1,4 +1,4 @@
-### Wiki
+### Transcribe CLI
 
 - [[Home]]
 - [[Installation]]

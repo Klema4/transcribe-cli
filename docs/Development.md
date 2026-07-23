@@ -1,11 +1,13 @@
 # Development
 
 ```bash
-git clone https://github.com/Klema4/local-whisper-transcribe.git
-cd local-whisper-transcribe
+git clone https://github.com/Klema4/transcribe-cli.git
+cd transcribe-cli
 pip install -e ".[dev]"
 pytest
 ```
+
+Python import path remains `local_whisper_transcribe`; the product name is **Transcribe CLI** (`lwt`).
 
 ## Structure
 
@@ -17,6 +19,8 @@ src/local_whisper_transcribe/
 ├── output.py         # TXT/SRT/VTT/JSON
 ├── diarize.py        # pyannote diarization
 ├── postprocess.py    # Ollama
+├── import_transcript.py
+├── progress_ui.py
 ├── models.py         # Whisper model cache
 ├── cuda_runtime.py   # CUDA 12 install & DLL paths
 ├── config.py         # TOML config
@@ -33,5 +37,3 @@ src/local_whisper_transcribe/
 pytest
 pytest -q tests/test_diarize.py
 ```
-
-44 tests covering output formats, models, diarization, CUDA, config.

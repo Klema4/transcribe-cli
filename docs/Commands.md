@@ -20,8 +20,16 @@ lwt t <file>                         # alias
 | `--speaker-names` | Comma-separated names |
 | `--hf-token` | HuggingFace token |
 | `--translate-to` | Translate via Ollama |
+| `--clean` | Clean transcript via Ollama |
 | `--summarize` | Meeting summary via Ollama |
 | `--ollama-model` | Ollama model for post-processing |
+
+## Clean existing transcript
+
+```bash
+lwt clean <transcript>
+lwt clean meeting.txt -o meeting.clean.txt
+```
 
 ## Setup
 

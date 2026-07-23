@@ -101,7 +101,7 @@ def _transcribe_with_model(
     language: str | None,
     task: str,
     initial_prompt: str | None,
-    progress_callback: Callable[[float, float], None] | None,
+    progress_callback: Callable[..., None] | None,
 ) -> TranscriptionResult:
     lang = None if language in (None, "", "auto") else language
 
@@ -121,7 +121,7 @@ def _transcribe_with_model(
             Segment(start=segment.start, end=segment.end, text=segment.text.strip())
         )
         if progress_callback and duration > 0:
-            progress_callback(segment.end, duration)
+            progress_callback(segment.end, duration, segment.text.strip())
 
     if progress_callback and duration > 0:
         progress_callback(duration, duration)
@@ -147,7 +147,7 @@ def transcribe(
     language: str | None = None,
     task: str = "transcribe",
     initial_prompt: str | None = None,
-    progress_callback: Callable[[float, float], None] | None = None,
+    progress_callback: Callable[..., None] | None = None,
     on_device_fallback: Callable[[str], None] | None = None,
 ) -> TranscriptionResult:
     """Transcribe an audio file and return structured segments."""

@@ -5,8 +5,10 @@ Config file location:
 lwt config path
 ```
 
-- **Windows:** `%USERPROFILE%\.config\local-whisper-transcribe\config.toml`
-- **Linux/macOS:** `~/.config/local-whisper-transcribe/config.toml`
+- **Windows:** `%USERPROFILE%\.config\transcribe-cli\config.toml`
+- **Linux/macOS:** `~/.config/transcribe-cli/config.toml`
+
+Legacy path `~/.config/local-whisper-transcribe/` is still loaded if present.
 
 ## Default
 

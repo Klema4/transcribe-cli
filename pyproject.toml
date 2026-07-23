@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "local-whisper-transcribe"
+name = "transcribe-cli"
 version = "0.1.0"
-description = "Local CLI tool for transcribing meetings from audio/video using faster-whisper"
+description = "Transcribe CLI - offline meeting transcription from audio/video using faster-whisper"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{ name = "local-whisper-transcribe contributors" }]
+authors = [{ name = "Transcribe CLI contributors" }]
 dependencies = [
     "faster-whisper>=1.0.0",
     "typer[all]>=0.12.0",

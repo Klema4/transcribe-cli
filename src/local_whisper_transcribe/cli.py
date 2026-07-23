@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Callable, Optional
 
 import typer
 from rich.console import Console
@@ -16,6 +18,8 @@ from rich.table import Table
 from rich.text import Text
 
 from local_whisper_transcribe.prompts import ask_confirm, ask_prompt
+
+from local_whisper_transcribe.progress_ui import ProgressWithPreview, format_timestamp
 
 from local_whisper_transcribe import __version__
 from local_whisper_transcribe.audio import FFmpegNotFoundError, check_ffmpeg, prepare_audio
@@ -39,6 +43,11 @@ from local_whisper_transcribe.diarize import (
     diarize_audio,
     merge_transcription_with_diarization,
     verify_diarization_access,
+)
+from local_whisper_transcribe.import_transcript import (
+    default_clean_output_path,
+    default_raw_backup_path,
+    load_transcript,
 )
 from local_whisper_transcribe.install_extra import (
     check_all_dependencies,
@@ -73,11 +82,11 @@ from local_whisper_transcribe.postprocess import (
     translate_text,
 )
 from local_whisper_transcribe.setup_wizard import run_setup_wizard
-from local_whisper_transcribe.transcribe import KNOWN_MODELS, load_model, transcribe
+from local_whisper_transcribe.transcribe import KNOWN_MODELS, Segment, TranscriptionResult, load_model, transcribe
 
 app = typer.Typer(
     name="lwt",
-    help="Local Whisper Transcribe — offline meeting transcription.",
+    help="Transcribe CLI - offline meeting transcription.",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
@@ -93,12 +102,13 @@ app.add_typer(ollama_app, name="ollama")
 console = Console(legacy_windows=False)
 
 BANNER = r"""
- _               _ _            __        __           _             
-| |   _ __ _   _| | | __ _ _ __\ \      / /___ _ __ __| | ___ _ __   
-| |  | '__| | | | | |/ _` | '_ \\ \ /\ / // _ \ '__/ _` |/ _ \ '__|  
-| |__| |  | |_| | | | (_| | | | |\ V  V /|  __/ | | (_| |  __/ |     
-|_____|_|   \__,_|_|_|\__,_|_| |_| \_/\_/  \___|_|  \__,_|\___|_|     
-  Transcribe meetings locally with faster-whisper
+  ____                              _ _             ____ _     ___
+ / ___|___  _ __ ___  _ __   ___  __| | |__  _ __   / ___| |   |_ _|
+| |   / _ \| '_ ` _ \| '_ \ / _ \/ _` | '_ \| '__| | |   | |    | |
+| |__| (_) | | | | | | |_) |  __/ (_| | |_) | |    | |___| |___ | |
+ \____\___/|_| |_| |_| .__/ \___|\__,_|_.__/|_|     \____|_____|___|
+                     |_|
+  Offline meeting transcription - command: lwt
 """
 
 
@@ -315,6 +325,86 @@ def _resolve_hf_token(
     return None
 
 
+def _make_incremental_clean_saver(
+    result: TranscriptionResult,
+    out_path: Path,
+    out_fmt: str,
+    *,
+    with_timestamps: bool,
+    source: str | None,
+) -> Callable[[list[Segment]], None]:
+    """Return a callback that writes the transcript after each cleaned batch."""
+
+    def save(segments: list[Segment]) -> None:
+        result.segments = segments
+        export_result(
+            result,
+            out_path,
+            out_fmt,
+            with_timestamps=with_timestamps,
+            source=source,
+        )
+
+    return save
+
+
+def _clean_segments_with_ollama(
+    segments: list[Segment],
+    *,
+    language: str | None,
+    ollama_llm: str,
+    ollama_url: str,
+    on_batch_saved: Callable[[list[Segment]], None] | None = None,
+) -> list[Segment]:
+    """Run Ollama transcript cleaning with progress UI."""
+    console.print(f"\n[bold]Cleaning transcript via Ollama ({ollama_llm})...[/bold]")
+    clean_ui = ProgressWithPreview(console, initial_preview="Preparing batches...")
+    with clean_ui:
+        task_id = clean_ui.add_task("Cleaning...", total=100)
+
+        def on_clean_progress(batch_num: int, total_batches: int) -> None:
+            clean_ui.update_task(
+                task_id,
+                completed=int(batch_num / total_batches * 100),
+                description=f"Cleaning batch {batch_num}/{total_batches}...",
+            )
+
+        def on_clean_preview(line: str) -> None:
+            clean_ui.set_preview(line, style="green")
+
+        def on_batch_complete(
+            cleaned_segments: list[Segment], _batch_num: int, _total_batches: int
+        ) -> None:
+            if on_batch_saved:
+                on_batch_saved(cleaned_segments)
+
+        cleaned = clean_transcript_segments(
+            segments,
+            language=language,
+            model=ollama_llm,
+            url=ollama_url,
+            on_progress=on_clean_progress,
+            on_preview=on_clean_preview,
+            on_batch_complete=on_batch_complete,
+        )
+        clean_ui.update_task(task_id, completed=100)
+    return cleaned
+
+
+def _resolve_clean_language(
+    config: dict,
+    *,
+    cli_language: str | None,
+    detected_language: str | None,
+) -> str | None:
+    if cli_language and cli_language != "auto":
+        return cli_language
+    if detected_language and detected_language != "auto":
+        return detected_language
+    default = config["defaults"]["language"]
+    return None if default == "auto" else default
+
+
 def _run_transcribe(
     input_file: Path,
     *,
@@ -455,23 +545,20 @@ def _run_transcribe(
                     on_device_fallback=on_device_fallback,
                 )
 
-            progress = Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                TimeElapsedColumn(),
-                console=console,
-            )
-
+            ui = ProgressWithPreview(console, initial_preview="Starting transcription...")
             result_holder: list = []
 
-            def on_progress(current: float, total: float) -> None:
-                if progress.tasks:
-                    progress.update(progress.tasks[0].id, completed=current, total=total)
+            def on_progress(current: float, total: float, segment_text: str = "") -> None:
+                if ui.progress.tasks:
+                    ui.update_task(ui.progress.tasks[0].id, completed=current, total=total)
+                if segment_text:
+                    ui.set_preview(
+                        f"@ {format_timestamp(current)}  {segment_text}",
+                        style="cyan",
+                    )
 
-            with progress:
-                task_id = progress.add_task("Transcribing...", total=100)
+            with ui:
+                task_id = ui.add_task("Transcribing...", total=100)
                 result_holder.append(
                     transcribe(
                         audio_path,
@@ -486,31 +573,28 @@ def _run_transcribe(
                         on_device_fallback=on_device_fallback,
                     )
                 )
-                progress.update(task_id, completed=100)
+                ui.update_task(task_id, completed=100)
 
             result = result_holder[0]
 
             if use_diarization and resolved_hf_token:
-                diarize_progress = Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                    TimeElapsedColumn(),
-                    console=console,
+                diarize_ui = ProgressWithPreview(
+                    console,
+                    initial_preview="Loading diarization pipeline...",
                 )
-                with diarize_progress:
-                    diarize_task = diarize_progress.add_task("Diarization...", total=100)
+                with diarize_ui:
+                    diarize_task = diarize_ui.add_task("Diarization...", total=100)
 
                     def on_diarize_progress(
                         completed: float, total: float, description: str
                     ) -> None:
-                        diarize_progress.update(
+                        diarize_ui.update_task(
                             diarize_task,
                             completed=completed,
                             total=total,
                             description=f"Diarization: {description}",
                         )
+                        diarize_ui.set_preview(description, style="magenta")
 
                     diarization_segments = diarize_audio(
                         audio_path,
@@ -561,37 +645,20 @@ def _run_transcribe(
             source=str(input_file),
         )
         extras["raw"] = raw_path
-
-        console.print(
-            f"\n[bold]Cleaning transcript via Ollama ({ollama_llm})...[/bold]"
+        save_partial = _make_incremental_clean_saver(
+            result,
+            out_path,
+            out_fmt,
+            with_timestamps=(out_fmt == "txt"),
+            source=str(input_file),
         )
-        clean_progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TimeElapsedColumn(),
-            console=console,
+        result.segments = _clean_segments_with_ollama(
+            result.segments,
+            language=result.language,
+            ollama_llm=ollama_llm,
+            ollama_url=ollama_url,
+            on_batch_saved=save_partial,
         )
-        with clean_progress:
-            task_id = clean_progress.add_task("Cleaning...", total=100)
-
-            def on_clean_progress(batch_num: int, total_batches: int) -> None:
-                clean_progress.update(
-                    task_id,
-                    completed=int(batch_num / total_batches * 100),
-                    description=f"Cleaning batch {batch_num}/{total_batches}...",
-                )
-
-            result.segments = clean_transcript_segments(
-                result.segments,
-                language=result.language,
-                model=ollama_llm,
-                url=ollama_url,
-                on_progress=on_clean_progress,
-            )
-            clean_progress.update(task_id, completed=100)
-
         result.metadata["cleaned"] = True
         result.metadata["clean_ollama_model"] = ollama_llm
 
@@ -795,6 +862,113 @@ def transcribe_short(
         speaker_names=speaker_names,
         hf_token=hf_token,
     )
+
+
+@app.command("clean")
+def clean_cmd(
+    input_file: Annotated[
+        Path,
+        typer.Argument(help="Existing transcript file (txt, srt, vtt, or json)."),
+    ],
+    output: Annotated[
+        Optional[Path],
+        typer.Option("--output", "-o", help="Output file path (default: overwrite or strip .raw)."),
+    ] = None,
+    fmt: Annotated[
+        str,
+        typer.Option("--format", "-f", help="Input format if extension is ambiguous."),
+    ] = "",
+    language: Annotated[
+        Optional[str],
+        typer.Option("--language", "-l", help="Transcript language for the cleaning prompt."),
+    ] = None,
+    ollama_model: Annotated[
+        Optional[str],
+        typer.Option("--ollama-model", help="Ollama model (default: from config / setup wizard)."),
+    ] = None,
+    no_backup: Annotated[
+        bool,
+        typer.Option("--no-backup", help="Do not save a .raw backup before cleaning."),
+    ] = False,
+) -> None:
+    """Clean an existing transcript via Ollama without re-transcribing."""
+    _print_banner()
+    config = load_config()
+    ollama_url = config["ollama"]["url"]
+    ollama_llm = ollama_model or config["ollama"]["model"]
+
+    if not input_file.exists():
+        console.print(f"[red]Error:[/red] File not found: {input_file}")
+        raise typer.Exit(1)
+
+    if not check_ollama_available(ollama_url):
+        console.print(
+            f"[red]Error:[/red] Ollama is not available at {ollama_url}.\n"
+            "Start Ollama or run: [bold cyan]lwt ollama status[/bold cyan]\n"
+            f"To download a model: [bold cyan]lwt ollama pull {ollama_llm}[/bold cyan]"
+        )
+        raise typer.Exit(1)
+
+    try:
+        result = load_transcript(input_file, fmt=fmt or None)
+    except (ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    out_path = default_clean_output_path(input_file, output)
+    out_fmt = out_path.suffix.lstrip(".").lower()
+    if out_fmt not in ("txt", "srt", "vtt", "json"):
+        out_fmt = (fmt or input_file.suffix.lstrip(".")).lower() or "txt"
+
+    raw_path = default_raw_backup_path(out_path)
+    if not no_backup and input_file.resolve() != raw_path.resolve():
+        shutil.copy2(input_file, raw_path)
+
+    clean_language = _resolve_clean_language(
+        config,
+        cli_language=language,
+        detected_language=result.language,
+    )
+    has_speakers = any(seg.speaker for seg in result.segments)
+    save_partial = _make_incremental_clean_saver(
+        result,
+        out_path,
+        out_fmt,
+        with_timestamps=(out_fmt == "txt" and has_speakers),
+        source=str(input_file),
+    )
+    result.segments = _clean_segments_with_ollama(
+        result.segments,
+        language=clean_language,
+        ollama_llm=ollama_llm,
+        ollama_url=ollama_url,
+        on_batch_saved=save_partial,
+    )
+    result.metadata["cleaned"] = True
+    result.metadata["clean_ollama_model"] = ollama_llm
+    result.metadata["clean_source"] = str(input_file)
+    if clean_language:
+        result.language = clean_language
+
+    export_result(
+        result,
+        out_path,
+        out_fmt,
+        with_timestamps=(out_fmt == "txt" and has_speakers),
+        source=str(input_file),
+    )
+
+    table = Table(title="Transcript cleaned", show_header=True, header_style="bold magenta")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value")
+    table.add_row("Input", str(input_file))
+    table.add_row("Output", str(out_path))
+    table.add_row("Segments", str(len(result.segments)))
+    table.add_row("Ollama model", ollama_llm)
+    if not no_backup and input_file.resolve() != raw_path.resolve():
+        table.add_row("Backup", str(raw_path))
+    console.print()
+    console.print(table)
 
 
 @app.command("setup")

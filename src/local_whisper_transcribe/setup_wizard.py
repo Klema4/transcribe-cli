@@ -36,7 +36,7 @@ def run_setup_wizard(
     force: bool = False,
 ) -> None:
     """Run the full interactive setup wizard."""
-    console.print("[bold]Welcome to the lwt setup wizard[/bold]")
+    console.print("[bold]Welcome to Transcribe CLI setup[/bold]")
     console.print("This wizard checks dependencies and saves your configuration.\n")
 
     config = load_config()
