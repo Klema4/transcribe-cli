@@ -5,7 +5,7 @@ lwt setup
 ```
 
 The wizard will:
-1. Check Python, ffmpeg, CUDA
+1. Check Python, ffmpeg, and the available acceleration backend (MLX on Apple Silicon or CUDA on NVIDIA)
 2. Show Whisper models (size, RAM)
 3. Download selected model (skips if already cached)
 4. Optionally configure diarization — [[HuggingFace Diarization]]

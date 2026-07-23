@@ -1,6 +1,6 @@
 # GPU and CUDA
 
-Whisper (faster-whisper / CTranslate2) and diarization (pyannote / PyTorch) share **one** device per job: both GPU or both CPU — never mixed.
+Whisper uses faster-whisper/CUDA on NVIDIA and MLX/Metal on Apple Silicon. Diarization uses pyannote/PyTorch; when diarization is enabled on Apple Silicon, Whisper and diarization intentionally use CPU because MLX and pyannote cannot share this device plan.
 
 ## Install CUDA stack (recommended)
 
@@ -32,11 +32,17 @@ Look for CUDA ready for Whisper + diarization.
 
 | Mode | Device |
 |------|--------|
-| Transcribe only | GPU if CTranslate2 sees CUDA |
+| Transcribe only | NVIDIA CUDA, Apple MLX/Metal, or CPU fallback |
 | Transcribe + `--diarize` | GPU only if **both** CTranslate2 and PyTorch see CUDA; otherwise **CPU for both** |
 
 Force CPU:
 
 ```bash
 lwt config set whisper.device cpu
+```
+
+On a native arm64 Python installation, `device = "auto"` selects MLX automatically on Apple Silicon. Force it with:
+
+```bash
+lwt config set whisper.device mlx
 ```

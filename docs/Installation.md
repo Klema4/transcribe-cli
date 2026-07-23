@@ -7,6 +7,7 @@
 | Python 3.10+ | yes | `python --version` |
 | ffmpeg | yes | Video → audio extraction |
 | NVIDIA GPU + CUDA | no | Faster transcription |
+| Apple Silicon Mac | no | MLX/Metal acceleration is selected automatically |
 | Ollama | no | Translation & summarization |
 | HuggingFace account | no | Only for `--diarize` — see [[HuggingFace Diarization]] |
 

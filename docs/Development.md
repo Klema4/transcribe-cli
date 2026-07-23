@@ -14,7 +14,7 @@ Python import path remains `local_whisper_transcribe`; the product name is **Tra
 ```
 src/local_whisper_transcribe/
 ├── cli.py            # Typer CLI + Rich UI
-├── transcribe.py     # faster-whisper wrapper
+├── transcribe.py     # faster-whisper + MLX Apple Silicon wrapper
 ├── audio.py          # ffmpeg extraction
 ├── output.py         # TXT/SRT/VTT/JSON
 ├── diarize.py        # pyannote diarization

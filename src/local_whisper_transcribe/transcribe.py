@@ -6,10 +6,17 @@ from dataclasses import dataclass, field
 import os
 import platform
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 
 # Configure CUDA DLL search paths before ctranslate2 loads GPU libraries.
 from local_whisper_transcribe.cuda_runtime import configure_cuda_dll_paths
+from local_whisper_transcribe.device import (
+    MLX_MODEL_REPOS,
+    is_apple_silicon,
+    mlx_whisper_available,
+    should_use_mlx,
+)
 
 configure_cuda_dll_paths()
 
@@ -49,10 +56,12 @@ def _is_cuda_runtime_error(exc: BaseException) -> bool:
     return any(marker in message for marker in _CUDA_ERROR_MARKERS)
 
 
-def _detect_device(device: str) -> str:
+def _detect_device(device: str, model: str | None = None) -> str:
     """Legacy helper — prefer ``device.resolve_device`` for shared Whisper/diarization."""
     if device != "auto":
         return device
+    if should_use_mlx("auto", model):
+        return "mlx"
     from local_whisper_transcribe.device import whisper_cuda_available
 
     return "cuda" if whisper_cuda_available() else "cpu"
@@ -63,7 +72,7 @@ def _resolve_compute_type(compute_type: str, device: str) -> str:
         if device == "cpu" and compute_type in ("float16", "float32"):
             return "int8"
         return compute_type
-    return "float16" if device == "cuda" else "int8"
+    return "float16" if device in ("cuda", "mlx") else "int8"
 
 
 def _resolve_cpu_threads(device: str, cpu_threads: int | None) -> int | None:
@@ -83,10 +92,7 @@ def _resolve_cpu_threads(device: str, cpu_threads: int | None) -> int | None:
 
 
 def _is_apple_silicon() -> bool:
-    return (
-        platform.system() == "Darwin"
-        and platform.machine().lower() in {"arm64", "arm64e", "aarch64"}
-    )
+    return is_apple_silicon()
 
 
 def _resolve_num_workers(device: str, num_workers: int | None) -> int | None:
@@ -102,6 +108,82 @@ def _resolve_num_workers(device: str, num_workers: int | None) -> int | None:
     if cpu_count <= 2:
         return 1
     return min(4, max(1, cpu_count // 2))
+
+
+@dataclass
+class _MLXSegment:
+    start: float
+    end: float
+    text: str
+
+
+class MLXWhisperModel:
+    """Small adapter exposing the faster-whisper transcription interface."""
+
+    backend = "mlx"
+
+    def __init__(self, model: str, compute_type: str = "float16") -> None:
+        if model not in MLX_MODEL_REPOS:
+            raise ValueError(
+                "MLX supports the built-in Whisper model names only: "
+                f"{', '.join(MLX_MODEL_REPOS)}"
+            )
+        if not mlx_whisper_available():
+            raise RuntimeError(
+                "Apple Silicon GPU support requires the optional 'mlx-whisper' "
+                "package. Reinstall Transcribe CLI with: pip install -e ."
+            )
+        self.model_name = model
+        self.model_repo = MLX_MODEL_REPOS[model]
+        self.compute_type = compute_type
+
+    def transcribe(
+        self,
+        audio_path: str,
+        *,
+        language: str | None = None,
+        task: str = "transcribe",
+        beam_size: int = 5,
+        condition_on_previous_text: bool = True,
+        initial_prompt: str | None = None,
+        **_: object,
+    ) -> tuple[object, object]:
+        import mlx_whisper
+
+        options: dict[str, object] = {
+            "task": task,
+            "condition_on_previous_text": condition_on_previous_text,
+            "verbose": False,
+        }
+        if language:
+            options["language"] = language
+        if initial_prompt:
+            options["initial_prompt"] = initial_prompt
+
+        result = mlx_whisper.transcribe(
+            audio_path,
+            path_or_hf_repo=self.model_repo,
+            **options,
+        )
+        raw_segments = result.get("segments", [])
+        segments = [
+            _MLXSegment(
+                start=float(segment.get("start", 0.0)),
+                end=float(segment.get("end", 0.0)),
+                text=str(segment.get("text", "")).strip(),
+            )
+            for segment in raw_segments
+        ]
+        duration = float(
+            result.get("duration")
+            or max((segment.end for segment in segments), default=0.0)
+        )
+        info = SimpleNamespace(
+            duration=duration,
+            language=result.get("language") or language or "unknown",
+            language_probability=result.get("language_probability"),
+        )
+        return iter(segments), info
 
 
 def _build_model_kwargs(
@@ -124,11 +206,26 @@ def load_model(
     num_workers: int | None = None,
     *,
     on_device_fallback: Callable[[str], None] | None = None,
-) -> WhisperModel:
+) -> WhisperModel | MLXWhisperModel:
     """Load a faster-whisper model with automatic device/compute selection."""
     configure_cuda_dll_paths()
-    resolved_device = _detect_device(device)
+    resolved_device = _detect_device(device, model)
     resolved_compute = _resolve_compute_type(compute_type, resolved_device)
+
+    if resolved_device == "mlx":
+        return MLXWhisperModel(model, compute_type=resolved_compute)
+
+    if (
+        device == "auto"
+        and _is_apple_silicon()
+        and not mlx_whisper_available()
+        and on_device_fallback
+    ):
+        on_device_fallback(
+            "Apple Silicon detected, but mlx-whisper is not installed. "
+            "Using CPU. Reinstall Transcribe CLI to enable Apple GPU support."
+        )
+
     resolved_cpu_threads = _resolve_cpu_threads(resolved_device, cpu_threads)
     resolved_num_workers = _resolve_num_workers(resolved_device, num_workers)
     model_kwargs = {
@@ -164,7 +261,7 @@ def load_model(
 
 
 def _transcribe_with_model(
-    whisper: WhisperModel,
+    whisper: WhisperModel | MLXWhisperModel,
     audio_path: Path,
     *,
     language: str | None,
@@ -213,7 +310,7 @@ def _transcribe_with_model(
 
 def transcribe(
     audio_path: Path,
-    model: WhisperModel | None = None,
+    model: WhisperModel | MLXWhisperModel | None = None,
     *,
     model_name: str = "small",
     device: str = "auto",

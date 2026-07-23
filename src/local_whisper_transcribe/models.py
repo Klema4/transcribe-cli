@@ -13,6 +13,7 @@ from faster_whisper.utils import _MODELS
 from huggingface_hub import constants, snapshot_download, try_to_load_from_cache
 
 from local_whisper_transcribe.transcribe import KNOWN_MODELS, load_model
+from local_whisper_transcribe.device import MLX_MODEL_REPOS, should_use_mlx
 
 # size, RAM, notes
 MODEL_INFO: dict[str, tuple[str, str, str]] = {
@@ -30,6 +31,14 @@ _ALLOW_PATTERNS = [
     "tokenizer.json",
     "vocabulary.*",
 ]
+_MLX_ALLOW_PATTERNS = [
+    "config.json",
+    "weights.npz",
+    "weights.safetensors",
+    "model.safetensors",
+    "tokenizer.json",
+    "*.tiktoken",
+]
 
 
 @dataclass
@@ -41,10 +50,12 @@ class CachedModelStatus:
     repo_id: str
 
 
-def get_repo_id(model_name: str) -> str:
+def get_repo_id(model_name: str, device: str = "auto") -> str:
     """Return the Hugging Face repo ID for a model name or path."""
     if "/" in model_name:
         return model_name
+    if should_use_mlx(device, model_name):
+        return MLX_MODEL_REPOS[model_name]
     repo_id = _MODELS.get(model_name)
     if repo_id is None:
         raise ValueError(
@@ -66,30 +77,32 @@ def _local_model_path(model_name: str) -> Path | None:
     return None
 
 
-def _cached_snapshot_dir(model_name: str) -> Path | None:
+def _cached_snapshot_dir(model_name: str, device: str = "auto") -> Path | None:
     local_path = _local_model_path(model_name)
     if local_path is not None:
         return local_path
 
     try:
-        repo_id = get_repo_id(model_name)
+        repo_id = get_repo_id(model_name, device)
     except ValueError:
         return None
 
-    cached_file = try_to_load_from_cache(repo_id=repo_id, filename="model.bin")
-    if cached_file is None:
-        return None
-    return Path(cached_file).parent
+    filenames = _MLX_ALLOW_PATTERNS if should_use_mlx(device, model_name) else ["model.bin"]
+    for filename in filenames:
+        cached_file = try_to_load_from_cache(repo_id=repo_id, filename=filename)
+        if cached_file is not None:
+            return Path(cached_file).parent
+    return None
 
 
-def is_model_cached(model_name: str) -> bool:
+def is_model_cached(model_name: str, device: str = "auto") -> bool:
     """Return True if the model is available locally."""
-    return _cached_snapshot_dir(model_name) is not None
+    return _cached_snapshot_dir(model_name, device) is not None
 
 
-def get_cached_model_path(model_name: str) -> Path | None:
+def get_cached_model_path(model_name: str, device: str = "auto") -> Path | None:
     """Return the local path to a cached model, if present."""
-    return _cached_snapshot_dir(model_name)
+    return _cached_snapshot_dir(model_name, device)
 
 
 def _directory_size(path: Path) -> int:
@@ -167,11 +180,12 @@ def download_model(
         load_model(str(local_path), device=device, compute_type=compute_type)
         return local_path
 
-    repo_id = get_repo_id(model_name)
-    already_cached = is_model_cached(model_name)
+    use_mlx = should_use_mlx(device, model_name)
+    repo_id = get_repo_id(model_name, device)
+    already_cached = is_model_cached(model_name, device)
 
     if force and already_cached:
-        snapshot_dir = _cached_snapshot_dir(model_name)
+        snapshot_dir = _cached_snapshot_dir(model_name, device)
         if snapshot_dir is not None:
             hub_dir_name = "models--" + repo_id.replace("/", "--")
             cache_root = get_cache_dir()
@@ -191,17 +205,20 @@ def download_model(
     if force or not already_cached:
         snapshot_download(
             repo_id,
-            allow_patterns=_ALLOW_PATTERNS,
+            # MLX repositories can contain tokenizer and mel-filter files whose
+            # names vary between model revisions, so keep the whole small repo.
+            allow_patterns=None if use_mlx else _ALLOW_PATTERNS,
             force_download=force,
         )
     else:
-        fw_download_model(model_name, local_files_only=True)
+        if not use_mlx:
+            fw_download_model(model_name, local_files_only=True)
 
     if status_callback:
         status_callback("Loading model to verify download...")
 
     load_model(model_name, device=device, compute_type=compute_type)
-    path = get_cached_model_path(model_name)
+    path = get_cached_model_path(model_name, device)
     if path is None:
         raise RuntimeError(f"Model '{model_name}' download finished but path not found.")
     return path

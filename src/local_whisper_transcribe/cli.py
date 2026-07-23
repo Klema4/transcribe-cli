@@ -62,7 +62,11 @@ from local_whisper_transcribe.cuda_runtime import (
     is_cuda_runtime_installed,
     is_torch_cuda_installed,
 )
-from local_whisper_transcribe.device import resolve_device
+from local_whisper_transcribe.device import (
+    is_apple_silicon,
+    mlx_whisper_available,
+    resolve_device,
+)
 from local_whisper_transcribe.models import (
     MODEL_INFO,
     check_cuda_available,
@@ -196,6 +200,24 @@ def _check_dependencies() -> list[tuple[str, bool, str]]:
     checks.append(("CUDA (optional)", cuda_ok, cuda_detail))
     runtime_ok, runtime_detail = check_cuda_runtime()
     checks.append(("CUDA 12 runtime", runtime_ok, runtime_detail))
+
+    if is_apple_silicon():
+        if mlx_whisper_available():
+            checks.append(
+                (
+                    "Apple Silicon / MLX",
+                    True,
+                    "Apple Silicon detected; MLX GPU backend is available",
+                )
+            )
+        else:
+            checks.append(
+                (
+                    "Apple Silicon / MLX",
+                    False,
+                    "Apple Silicon detected, but mlx-whisper is not installed",
+                )
+            )
     return checks
 
 
@@ -249,6 +271,17 @@ def _run_quick_setup(
     compute_type = config["whisper"]["compute_type"]
     messages: list[str] = []
 
+    if is_apple_silicon() and mlx_whisper_available() and device in ("auto", "mlx"):
+        console.print(
+            "[bold cyan]Apple Silicon detected.[/bold cyan] "
+            "You will now download MLX models for macOS compatibility."
+        )
+    elif is_apple_silicon() and not mlx_whisper_available():
+        console.print(
+            "[yellow]Apple Silicon detected, but mlx-whisper is unavailable. "
+            "The CPU model will be downloaded instead.[/yellow]"
+        )
+
     with console.status("[bold green]Preparing model download..."):
         try:
             model_path = download_model(
@@ -281,9 +314,9 @@ def _run_quick_setup(
     return selected
 
 
-def _ensure_model_ready(model_name: str) -> None:
+def _ensure_model_ready(model_name: str, device: str = "auto") -> None:
     """Prompt for setup when model cache is missing."""
-    if is_model_cached(model_name):
+    if is_model_cached(model_name, device):
         return
 
     console.print()
@@ -450,6 +483,7 @@ def _run_transcribe(
     ollama_model: str | None,
     task: str,
     diarize: bool = False,
+    no_diarize: bool = False,
     num_speakers: int | None = None,
     speaker_names: str | None = None,
     hf_token: str | None = None,
@@ -495,7 +529,9 @@ def _run_transcribe(
     output_dir = config["defaults"]["output_dir"]
     ollama_url = config["ollama"]["url"]
     ollama_llm = ollama_model or config["ollama"]["model"]
-    use_diarization = diarize or config["diarization"]["enabled"]
+    use_diarization = not no_diarize and (
+        diarize or config["diarization"]["enabled"]
+    )
 
     if not input_file.exists():
         console.print(f"[red]Error:[/red] File not found: {input_file}")
@@ -573,6 +609,7 @@ def _run_transcribe(
     device_plan = resolve_device(
         device,
         need_torch=use_diarization,
+        model=model_name,
         on_note=on_device_note,
     )
     device = device_plan.device
@@ -582,7 +619,7 @@ def _run_transcribe(
         + "[/dim]"
     )
 
-    if not is_setup_complete() and not is_model_cached(model_name):
+    if not is_setup_complete() and not is_model_cached(model_name, device):
         console.print(
             "[yellow]First run?[/yellow] We recommend: [bold cyan]lwt setup[/bold cyan]"
         )
@@ -591,7 +628,7 @@ def _run_transcribe(
         else:
             raise typer.Exit(1)
     else:
-        _ensure_model_ready(model_name)
+        _ensure_model_ready(model_name, device=device)
 
     try:
         with prepare_audio(input_file) as audio_path:
@@ -608,42 +645,56 @@ def _run_transcribe(
                     on_device_fallback=on_device_fallback,
                 )
 
-            ui = ProgressWithPreview(console, initial_preview="Starting transcription...")
-            result_holder: list = []
-
-            def on_progress(current: float, total: float, segment_text: str = "") -> None:
-                if ui.progress.tasks:
-                    ui.update_task(ui.progress.tasks[0].id, completed=current, total=total)
-                if segment_text:
-                    ui.set_preview(
-                        f"@ {format_timestamp(current)}  {segment_text}",
-                        style="cyan",
-                    )
-
-            with ui:
-                task_id = ui.add_task("Transcribing...", total=100)
-                result_holder.append(
-                    transcribe(
-                        audio_path,
-                        model=whisper_model,
-                        model_name=model_name,
-                        device=device,
-                        compute_type=compute_type,
-                        cpu_threads=cpu_threads,
-                        num_workers=num_workers,
-                        language=lang,
-                        task=task,
-                        initial_prompt=prompt,
-                        beam_size=beam_size,
-                        condition_on_previous_text=condition_on_previous_text,
-                        vad_filter=vad_filter,
-                        progress_callback=on_progress,
-                        on_device_fallback=on_device_fallback,
-                    )
+            def run_transcription(progress_callback: Callable[..., None] | None) -> TranscriptionResult:
+                return transcribe(
+                    audio_path,
+                    model=whisper_model,
+                    model_name=model_name,
+                    device=device,
+                    compute_type=compute_type,
+                    cpu_threads=cpu_threads,
+                    num_workers=num_workers,
+                    language=lang,
+                    task=task,
+                    initial_prompt=prompt,
+                    beam_size=beam_size,
+                    condition_on_previous_text=condition_on_previous_text,
+                    vad_filter=vad_filter,
+                    progress_callback=progress_callback,
+                    on_device_fallback=on_device_fallback,
                 )
-                ui.update_task(task_id, completed=100)
 
-            result = result_holder[0]
+            if getattr(whisper_model, "backend", None) == "mlx":
+                # mlx-whisper exposes its own accurate frame progress bar. Its
+                # blocking API cannot update our segment-based Rich progress.
+                result = run_transcription(None)
+            else:
+                ui = ProgressWithPreview(
+                    console,
+                    initial_preview="Starting transcription...",
+                )
+
+                def on_progress(
+                    current: float,
+                    total: float,
+                    segment_text: str = "",
+                ) -> None:
+                    if ui.progress.tasks:
+                        ui.update_task(
+                            ui.progress.tasks[0].id,
+                            completed=current,
+                            total=total,
+                        )
+                    if segment_text:
+                        ui.set_preview(
+                            f"@ {format_timestamp(current)}  {segment_text}",
+                            style="cyan",
+                        )
+
+                with ui:
+                    task_id = ui.add_task("Transcribing...", total=100)
+                    result = run_transcription(on_progress)
+                    ui.update_task(task_id, completed=100)
 
             if use_diarization and resolved_hf_token:
                 diarize_ui = ProgressWithPreview(
@@ -863,6 +914,13 @@ def transcribe_cmd(
     diarize: Annotated[
         bool, typer.Option("--diarize", help="Identify speakers with pyannote.audio.")
     ] = False,
+    no_diarize: Annotated[
+        bool,
+        typer.Option(
+            "--no-diarize",
+            help="Disable diarization for this run, overriding the config.",
+        ),
+    ] = False,
     num_speakers: Annotated[
         Optional[int], typer.Option("--num-speakers", help="Expected number of speakers.")
     ] = None,
@@ -888,6 +946,7 @@ def transcribe_cmd(
         ollama_model=ollama_model,
         task=task,
         diarize=diarize,
+        no_diarize=no_diarize,
         num_speakers=num_speakers,
         speaker_names=speaker_names,
         hf_token=hf_token,
@@ -908,6 +967,13 @@ def transcribe_short(
     ollama_model: Annotated[Optional[str], typer.Option("--ollama-model")] = None,
     task: Annotated[str, typer.Option("--task")] = "transcribe",
     diarize: Annotated[bool, typer.Option("--diarize")] = False,
+    no_diarize: Annotated[
+        bool,
+        typer.Option(
+            "--no-diarize",
+            help="Disable diarization for this run, overriding the config.",
+        ),
+    ] = False,
     num_speakers: Annotated[Optional[int], typer.Option("--num-speakers")] = None,
     speaker_names: Annotated[Optional[str], typer.Option("--speaker-names")] = None,
     hf_token: Annotated[Optional[str], typer.Option("--hf-token")] = None,
@@ -926,6 +992,7 @@ def transcribe_short(
         ollama_model=ollama_model,
         task=task,
         diarize=diarize,
+        no_diarize=no_diarize,
         num_speakers=num_speakers,
         speaker_names=speaker_names,
         hf_token=hf_token,

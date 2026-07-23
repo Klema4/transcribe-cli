@@ -15,10 +15,10 @@ Legacy path `~/.config/local-whisper-transcribe/` is still loaded if present.
 ```toml
 [whisper]
 model = "small"
-device = "auto"          # auto | cuda | cpu
+device = "auto"          # auto | cuda | mlx | cpu; MLX is selected on Apple Silicon
 compute_type = "auto"
 cpu_threads = "auto"     # auto | integer (Apple Silicon auto => CPU-bound threads tuned for M1/M2/M3/M4/M5)
-num_workers = "auto"     # auto | integer (Apple Silicon auto => half of logical cores, capped at 4)
+num_workers = "auto"     # auto | integer (Apple Silicon CPU fallback => half of logical cores, capped at 4)
 beam_size = 5            # decoding beam, lower = faster
 condition_on_previous_text = true
 vad_filter = true
@@ -45,6 +45,7 @@ setup_complete = false
 ```bash
 lwt config set whisper.model medium
 lwt config set whisper.device cpu
+lwt config set whisper.device mlx     # force Apple GPU backend on Apple Silicon
 lwt config set defaults.language cs
 lwt config set diarization.hf_token hf_xxx
 lwt config set ollama.model llama3.2

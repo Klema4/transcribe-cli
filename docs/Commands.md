@@ -16,6 +16,7 @@ lwt t <file>                         # alias
 | `--output`, `-o` | Output file |
 | `--task` | transcribe (default) or translate (English only) |
 | `--diarize` | Speaker identification — [[HuggingFace Diarization]] |
+| `--no-diarize` | Disable diarization for this run, overriding the config |
 | `--num-speakers` | Hint for diarization |
 | `--speaker-names` | Comma-separated names |
 | `--hf-token` | HuggingFace token |

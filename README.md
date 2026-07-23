@@ -2,7 +2,7 @@
 
 Offline meeting transcription from audio or video. Command: **`lwt`**.
 
-Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper). Everything runs on your machine — optional AI cleaning, translation, summarization, and speaker labels included.
+Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper), with automatic [MLX](https://github.com/ml-explore/mlx) GPU acceleration on Apple Silicon. Everything runs on your machine — optional AI cleaning, translation, summarization, and speaker labels included.
 
 Full docs: [Wiki](https://github.com/Klema4/transcribe-cli/wiki) · [docs/](docs/Home.md)
 
@@ -17,6 +17,7 @@ Full docs: [Wiki](https://github.com/Klema4/transcribe-cli/wiki) · [docs/](docs
 | Python 3.10+ | yes | — |
 | [ffmpeg](https://ffmpeg.org) | yes | see below |
 | NVIDIA GPU | no | faster runs |
+| Apple Silicon GPU | no | enabled automatically on native arm64 macOS |
 | [Ollama](https://ollama.com) | no | `--clean`, `--translate-to`, `--summarize` |
 | HuggingFace token | no | only for `--diarize` |
 
@@ -70,7 +71,7 @@ python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
 lwt setup
 ```
 
-Picks a Whisper model, checks ffmpeg/CUDA, optionally configures Ollama and diarization.
+Picks a Whisper model, checks ffmpeg and the available acceleration backend (MLX on Apple Silicon or CUDA on NVIDIA), optionally configures Ollama and diarization.
 
 ```bash
 lwt setup --quick              # model only
@@ -159,6 +160,7 @@ lwt transcribe meeting.mp4 \
 | `--translate-to` | Translate via Ollama |
 | `--summarize` | Meeting notes via Ollama |
 | `--diarize` | Who spoke when |
+| `--no-diarize` | Disable diarization for this run, even if enabled in config |
 | `--speaker-names` | `"Alice,Bob,Carol"` |
 
 → Full flag list: [`lwt --help`](docs/Commands.md) · [Commands wiki](https://github.com/Klema4/transcribe-cli/wiki/Commands)
@@ -236,6 +238,7 @@ lwt config set defaults.format srt
 lwt config set ollama.model llama3.2
 lwt config set diarization.hf_token hf_xxx
 lwt config set whisper.device cpu          # force CPU
+lwt config set whisper.device mlx          # force MLX on Apple Silicon
 ```
 
 Config file (created on first run):
@@ -257,7 +260,8 @@ Config file (created on first run):
 | Ollama flags fail | `lwt ollama status` → start Ollama → `lwt ollama pull llama3.2` |
 | Diarization 403 / gated | Accept all 4 HF licenses + save token → `lwt install verify-diarization` |
 | `cublas64_12.dll` missing | `lwt install cuda` (or `lwt config set whisper.device cpu`) |
-| Slow | Smaller model, or install CUDA via `lwt install cuda` |
+| Apple GPU not used | Reinstall with `pip install -e .` from a native arm64 Python environment |
+| Slow | On Apple Silicon, reinstall with `pip install -e .` to enable MLX; on NVIDIA, install CUDA via `lwt install cuda` |
 
 More: [Troubleshooting](docs/Troubleshooting.md) · [GPU & CUDA](docs/GPU-and-CUDA.md)
 
@@ -275,7 +279,7 @@ Python package path remains `local_whisper_transcribe` (CLI entry point: `lwt`).
 ```
 src/local_whisper_transcribe/
 ├── cli.py            # Typer CLI + Rich UI
-├── transcribe.py     # faster-whisper
+├── transcribe.py     # faster-whisper + MLX Apple Silicon backend
 ├── audio.py          # ffmpeg
 ├── output.py         # TXT / SRT / VTT / JSON
 ├── diarize.py        # pyannote
