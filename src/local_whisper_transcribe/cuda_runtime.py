@@ -38,7 +38,10 @@ def get_cuda_toolkit_install_command() -> str:
 
 def _nvidia_bin_dir(package: str) -> Path | None:
     """Return nvidia.<package>.bin directory from pip wheels."""
-    spec = importlib.util.find_spec(f"nvidia.{package}.bin")
+    try:
+        spec = importlib.util.find_spec(f"nvidia.{package}.bin")
+    except ModuleNotFoundError:
+        return None
     if spec and spec.submodule_search_locations:
         for location in spec.submodule_search_locations:
             path = Path(location)
