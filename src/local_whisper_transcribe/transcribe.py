@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
+import platform
 from pathlib import Path
 from typing import Callable
 
@@ -64,10 +66,40 @@ def _resolve_compute_type(compute_type: str, device: str) -> str:
     return "float16" if device == "cuda" else "int8"
 
 
+def _resolve_cpu_threads(device: str, cpu_threads: int | None) -> int | None:
+    if cpu_threads is not None:
+        return cpu_threads
+    if device != "cpu":
+        return None
+    if platform.system() != "Darwin":
+        return None
+
+    # Apple Silicon is usually fast for Whisper on CPU with a few dedicated threads.
+    # Keep one core for non-Whisper work and avoid over-subscribing tiny systems.
+    cpu_count = os.cpu_count() or 1
+    if cpu_count <= 2:
+        return 1
+    return min(8, max(1, cpu_count - 1))
+
+
+def _build_model_kwargs(
+    cpu_threads: int | None,
+    num_workers: int | None,
+) -> dict[str, int]:
+    kwargs: dict[str, int] = {}
+    if cpu_threads is not None:
+        kwargs["cpu_threads"] = cpu_threads
+    if num_workers is not None:
+        kwargs["num_workers"] = num_workers
+    return kwargs
+
+
 def load_model(
     model: str,
     device: str = "auto",
     compute_type: str = "auto",
+    cpu_threads: int | None = None,
+    num_workers: int | None = None,
     *,
     on_device_fallback: Callable[[str], None] | None = None,
 ) -> WhisperModel:
@@ -75,9 +107,15 @@ def load_model(
     configure_cuda_dll_paths()
     resolved_device = _detect_device(device)
     resolved_compute = _resolve_compute_type(compute_type, resolved_device)
+    resolved_cpu_threads = _resolve_cpu_threads(resolved_device, cpu_threads)
+    model_kwargs = {
+        "device": resolved_device,
+        "compute_type": resolved_compute,
+    }
+    model_kwargs.update(_build_model_kwargs(resolved_cpu_threads, num_workers))
 
     try:
-        return WhisperModel(model, device=resolved_device, compute_type=resolved_compute)
+        return WhisperModel(model, **model_kwargs)
     except Exception as exc:
         if resolved_device != "cuda" or not _is_cuda_runtime_error(exc):
             raise
@@ -91,7 +129,12 @@ def load_model(
             on_device_fallback(message)
 
         cpu_compute = _resolve_compute_type(compute_type, "cpu")
-        return WhisperModel(model, device="cpu", compute_type=cpu_compute)
+        return WhisperModel(
+            model,
+            device="cpu",
+            compute_type=cpu_compute,
+            **_build_model_kwargs(_resolve_cpu_threads("cpu", cpu_threads), num_workers),
+        )
 
 
 def _transcribe_with_model(
@@ -102,6 +145,9 @@ def _transcribe_with_model(
     task: str,
     initial_prompt: str | None,
     progress_callback: Callable[..., None] | None,
+    beam_size: int = 5,
+    condition_on_previous_text: bool = True,
+    vad_filter: bool = True,
 ) -> TranscriptionResult:
     lang = None if language in (None, "", "auto") else language
 
@@ -109,7 +155,9 @@ def _transcribe_with_model(
         str(audio_path),
         language=lang,
         task=task,
-        vad_filter=True,
+        beam_size=beam_size,
+        condition_on_previous_text=condition_on_previous_text,
+        vad_filter=vad_filter,
         initial_prompt=initial_prompt,
     )
 
@@ -144,9 +192,14 @@ def transcribe(
     model_name: str = "small",
     device: str = "auto",
     compute_type: str = "auto",
+    cpu_threads: int | None = None,
+    num_workers: int | None = None,
     language: str | None = None,
     task: str = "transcribe",
     initial_prompt: str | None = None,
+    beam_size: int = 5,
+    condition_on_previous_text: bool = True,
+    vad_filter: bool = True,
     progress_callback: Callable[..., None] | None = None,
     on_device_fallback: Callable[[str], None] | None = None,
 ) -> TranscriptionResult:
@@ -155,6 +208,8 @@ def transcribe(
         model_name,
         device=device,
         compute_type=compute_type,
+        cpu_threads=cpu_threads,
+        num_workers=num_workers,
         on_device_fallback=on_device_fallback,
     )
 
@@ -165,6 +220,9 @@ def transcribe(
             language=language,
             task=task,
             initial_prompt=initial_prompt,
+            beam_size=beam_size,
+            condition_on_previous_text=condition_on_previous_text,
+            vad_filter=vad_filter,
             progress_callback=progress_callback,
         )
     except Exception as exc:
@@ -183,6 +241,8 @@ def transcribe(
             model_name,
             device="cpu",
             compute_type=compute_type,
+            cpu_threads=cpu_threads,
+            num_workers=num_workers,
         )
         return _transcribe_with_model(
             whisper_cpu,
@@ -190,5 +250,8 @@ def transcribe(
             language=language,
             task=task,
             initial_prompt=initial_prompt,
+            beam_size=beam_size,
+            condition_on_previous_text=condition_on_previous_text,
+            vad_filter=vad_filter,
             progress_callback=progress_callback,
         )

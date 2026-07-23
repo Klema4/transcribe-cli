@@ -125,6 +125,40 @@ def _resolve_output_path(
     return default_output_path(input_path, dir_path, fmt)
 
 
+def _parse_int_config(value: object, key: str, *, default: int | None) -> int | None:
+    if value is None:
+        return default
+    if isinstance(value, int):
+        if value <= 0:
+            return default
+        return value
+    value_str = str(value).strip()
+    if value_str.lower() in {"", "auto", "default"}:
+        return default
+    try:
+        parsed = int(value_str)
+    except ValueError as exc:
+        raise ValueError(f"Invalid config value for [whisper.{key}]: {value!r}") from exc
+    if parsed <= 0:
+        return default
+    return parsed
+
+
+def _parse_bool_config(value: object, key: str, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    value_str = str(value).strip().lower()
+    if value_str in {"", "auto", "default"}:
+        return default
+    if value_str in {"true", "1", "yes", "on", "enabled"}:
+        return True
+    if value_str in {"false", "0", "no", "off", "disabled"}:
+        return False
+    raise ValueError(f"Invalid config value for [whisper.{key}]: {value!r}")
+
+
 def _models_table(*, show_ram: bool = False, show_cached: bool = False) -> Table:
     table = Table(title="Whisper Models", show_header=True, header_style="bold green")
     table.add_column("Model", style="cyan")
@@ -426,6 +460,36 @@ def _run_transcribe(
     model_name = model or config["whisper"]["model"]
     device = config["whisper"]["device"]
     compute_type = config["whisper"]["compute_type"]
+    try:
+        cpu_threads = _parse_int_config(
+            config["whisper"].get("cpu_threads"),
+            "cpu_threads",
+            default=None,
+        )
+        num_workers = _parse_int_config(
+            config["whisper"].get("num_workers"),
+            "num_workers",
+            default=None,
+        )
+        beam_size = _parse_int_config(
+            config["whisper"].get("beam_size"),
+            "beam_size",
+            default=5,
+        )
+        condition_on_previous_text = _parse_bool_config(
+            config["whisper"].get("condition_on_previous_text"),
+            "condition_on_previous_text",
+            default=True,
+        )
+        vad_filter = _parse_bool_config(
+            config["whisper"].get("vad_filter"),
+            "vad_filter",
+            default=True,
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
     lang = language or config["defaults"]["language"]
     out_fmt = (fmt or config["defaults"]["format"]).lower()
     output_dir = config["defaults"]["output_dir"]
@@ -539,6 +603,8 @@ def _run_transcribe(
                     model_name,
                     device=device,
                     compute_type=compute_type,
+                    cpu_threads=cpu_threads,
+                    num_workers=num_workers,
                     on_device_fallback=on_device_fallback,
                 )
 
@@ -563,9 +629,14 @@ def _run_transcribe(
                         model_name=model_name,
                         device=device,
                         compute_type=compute_type,
+                        cpu_threads=cpu_threads,
+                        num_workers=num_workers,
                         language=lang,
                         task=task,
                         initial_prompt=prompt,
+                        beam_size=beam_size,
+                        condition_on_previous_text=condition_on_previous_text,
+                        vad_filter=vad_filter,
                         progress_callback=on_progress,
                         on_device_fallback=on_device_fallback,
                     )

@@ -23,6 +23,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "model": "small",
         "device": "auto",
         "compute_type": "auto",
+        "cpu_threads": "auto",
+        "num_workers": "auto",
+        "beam_size": 5,
+        "condition_on_previous_text": True,
+        "vad_filter": True,
     },
     "defaults": {
         "language": "auto",
@@ -114,6 +119,8 @@ def set_config_value(key: str, value: str) -> None:
         raise ValueError(f"Unknown config option: {option} in section [{section}]")
 
     if option in ("enabled", "setup_complete"):
+        config[section][option] = value.lower() in ("true", "1", "yes", "on")
+    elif option in ("condition_on_previous_text", "vad_filter"):
         config[section][option] = value.lower() in ("true", "1", "yes", "on")
     else:
         config[section][option] = value
