@@ -73,7 +73,7 @@ sudo apt install ffmpeg
 ## Installation
 
 ```bash
-git clone https://github.com/Klema4/local-whisper-transcribe.git
+git clone https://github.com/Klema4/transcribe-cli.git
 cd local-whisper-transcribe
 pip install -e .
 ```
