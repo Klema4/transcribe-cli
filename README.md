@@ -291,6 +291,12 @@ src/local_whisper_transcribe/
 
 ---
 
+## Contributing
+
+Bug reports, ideas, and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
 ## License
 
 MIT

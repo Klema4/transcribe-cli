@@ -37,3 +37,7 @@ src/local_whisper_transcribe/
 pytest
 pytest -q tests/test_diarize.py
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for issues, pull requests, and local setup.
